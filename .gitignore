@@ -1,0 +1,39 @@
+# dependencies
+node_modules
+
+# next.js
+.next
+/out
+
+# build output
+dist
+/build
+
+# testing
+coverage
+
+# env files (keep .env.example tracked)
+.env
+.env.local
+.env*.local
+!.env.example
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# private design notes, not part of submission
+DESIGN.html

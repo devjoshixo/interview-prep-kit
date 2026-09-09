@@ -1,0 +1,14 @@
+[
+  {
+    "id": "case-001",
+    "jd": "We are hiring a Backend Engineer to build and operate high-throughput APIs in Go and TypeScript. You will design services, own reliability, and mentor peers.",
+    "company_url": "https://example.com",
+    "days": 4
+  },
+  {
+    "id": "case-002",
+    "jd": "Frontend Engineer wanted: React, TypeScript, and a sharp eye for accessible, fast UIs. You will collaborate with design and ship customer-facing features.",
+    "company_url": "https://example.org",
+    "days": 3
+  }
+]
