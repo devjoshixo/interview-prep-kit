@@ -13,7 +13,7 @@ export default async function LoginPage() {
       <Droplets />
       <div className="relative mx-auto grid min-h-[calc(100vh-4px)] w-full max-w-5xl grid-cols-1 items-center gap-8 px-6 py-10 md:grid-cols-2 md:px-10">
         {/* left — brand + preview graphic */}
-        <div className="hidden flex-col justify-center md:flex">
+        <div className="flex flex-col justify-center">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">
             Interview Prep Kit
           </p>
@@ -52,9 +52,6 @@ export default async function LoginPage() {
         {/* right — auth form */}
         <div className="flex items-center justify-center">
           <div className="w-full max-w-sm">
-            <p className="mb-6 text-center text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3 md:hidden">
-              Interview Prep Kit
-            </p>
             <AuthForm />
           </div>
         </div>

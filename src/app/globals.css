@@ -131,8 +131,8 @@ body {
 .droplet {
   position: absolute;
   border-radius: 9999px;
-  filter: blur(46px);
-  opacity: 0.4;
+  filter: blur(28px);
+  opacity: 0.34;
   will-change: transform;
 }
 @keyframes drift-a {
