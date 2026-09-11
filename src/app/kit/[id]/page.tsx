@@ -11,9 +11,10 @@ export default async function KitPage({ params }: PageProps<"/kit/[id]">) {
   const { id } = await params;
 
   await connectDB();
-  let doc: { kit: Kit } | null = null;
+  type Doc = { kit: Kit; editState?: Record<string, Record<string, "edited" | "user-created">> };
+  let doc: Doc | null = null;
   try {
-    doc = (await KitModel.findById(id).lean()) as { kit: Kit } | null;
+    doc = (await KitModel.findById(id).lean()) as Doc | null;
   } catch {
     doc = null; // malformed id -> not found
   }
@@ -23,7 +24,7 @@ export default async function KitPage({ params }: PageProps<"/kit/[id]">) {
     <main className="relative flex-1">
       <div className="hero-glow" />
       <div className="relative mx-auto w-full max-w-[760px] px-5 py-12 sm:py-16">
-        <KitView kit={doc.kit} kitId={id} />
+        <KitView kit={doc.kit} kitId={id} editState={doc.editState ?? {}} />
       </div>
     </main>
   );
