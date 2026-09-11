@@ -28,10 +28,25 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!uid) return NextResponse.json({ error: "sign in required" }, { status: 401 });
   await connectDB();
   const doc = (await KitModel.findById(id).lean().catch(() => null)) as
-    | { userId?: string; kit?: unknown; editState?: unknown; version?: number }
+    | {
+        userId?: string;
+        kit?: unknown;
+        editState?: unknown;
+        version?: number;
+        status?: string;
+        progress?: { step: number; label: string };
+        error?: string;
+      }
     | null;
   if (!doc || doc.userId !== uid) return NextResponse.json({ error: "not found" }, { status: 404 });
-  return NextResponse.json({ kit: doc.kit, editState: doc.editState ?? {}, version: doc.version ?? 0 });
+  return NextResponse.json({
+    status: doc.status ?? "ready",
+    progress: doc.progress ?? { step: 0, label: "" },
+    error: doc.error ?? null,
+    kit: doc.kit,
+    editState: doc.editState ?? {},
+    version: doc.version ?? 0,
+  });
 }
 
 // PATCH /api/kits/[id]  { section, action, itemId?, patch?, item?, version }

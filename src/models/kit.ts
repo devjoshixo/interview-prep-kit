@@ -12,10 +12,15 @@ export type EditStatus = "edited" | "user-created";
 export type EditState = Partial<Record<string, Record<string, EditStatus>>>;
 export type Tombstones = Partial<Record<string, string[]>>;
 
+export type JobStatus = "generating" | "ready" | "failed";
+
 export type KitDoc = {
   _id: string;
   userId: string;
   version: number;
+  status: JobStatus;
+  progress: { step: number; label: string };
+  error?: string;
   inputs: { jd: string; company_url: string; days: number };
   kit: Kit;
   editState: EditState;
@@ -29,12 +34,16 @@ const KitSchema = new Schema(
     // Optimistic-concurrency counter: every mutating write compare-and-swaps on
     // this, so concurrent edits/regenerates can't silently lose an update.
     version: { type: Number, default: 0 },
+    // Background-generation lifecycle. Non-job docs default to "ready".
+    status: { type: String, enum: ["generating", "ready", "failed"], default: "ready" },
+    progress: { type: Schema.Types.Mixed, default: () => ({ step: 0, label: "" }) },
+    error: { type: String },
     inputs: {
       jd: { type: String, required: true },
       company_url: { type: String, default: "" },
       days: { type: Number, required: true },
     },
-    kit: { type: Schema.Types.Mixed, required: true },
+    kit: { type: Schema.Types.Mixed, default: () => ({}) },
     editState: { type: Schema.Types.Mixed, default: () => ({}) },
     tombstones: { type: Schema.Types.Mixed, default: () => ({}) },
     createdAt: { type: Date, default: Date.now },
