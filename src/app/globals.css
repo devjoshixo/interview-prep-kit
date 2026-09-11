@@ -126,3 +126,27 @@ body {
     transform: none;
   }
 }
+
+/* Floating gradient droplets */
+.droplet {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(46px);
+  opacity: 0.4;
+  will-change: transform;
+}
+@keyframes drift-a {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(34px, -42px) scale(1.12); }
+}
+@keyframes drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-42px, 34px) scale(1.16); }
+}
+@keyframes drift-c {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(26px, 44px) scale(0.94); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .droplet { animation: none !important; }
+}
