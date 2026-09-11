@@ -64,6 +64,12 @@ const STEP4 = [
   ]),
 ];
 
+// Step 8 — flashcards. One dangling id to prove it is stripped.
+const FLASH = JSON.stringify([
+  { requirement_ids: ["req-1"], front: "What is Go?", back: "A language." },
+  { requirement_ids: ["req-2", "req-nope"], front: "Kubernetes?", back: "Orchestrator." },
+]);
+
 describe("makeKit — step 1 -> 2 -> 3 -> 4 chain", () => {
   it("builds role + brief + web enrichment + questions, each step keeping the last intact", async () => {
     const html: Record<string, string> = {
@@ -81,7 +87,7 @@ describe("makeKit — step 1 -> 2 -> 3 -> 4 chain", () => {
 
     const kit = await makeKit(
       { jd: JD, company_url: "https://acme.com", days: 5 },
-      { llm: queuedLlm([STEP1, STEP2, STEP3, ...STEP4]), fetchPage, search }
+      { llm: queuedLlm([STEP1, STEP2, STEP3, ...STEP4, FLASH]), fetchPage, search }
     );
 
     // step 1
@@ -110,6 +116,9 @@ describe("makeKit — step 1 -> 2 -> 3 -> 4 chain", () => {
     expect(kit.schedule.days.length).toBeLessThanOrEqual(5);
     const scheduled = kit.schedule.days.flatMap((d) => d.question_ids);
     expect(scheduled.slice().sort()).toEqual(kit.questions.map((q) => q.id).sort());
+    // step 8 — flashcards built and grounded (dangling ref stripped)
+    expect(kit.flashcards).toHaveLength(2);
+    expect(kit.flashcards[1].requirement_ids).toEqual(["req-2"]);
   });
 
   it("all external steps failing leaves step 1 intact — honest-none, no crash", async () => {
@@ -130,6 +139,8 @@ describe("makeKit — step 1 -> 2 -> 3 -> 4 chain", () => {
     expect(kit.coverage.uncovered_requirement_ids).toEqual(["req-1", "req-2"]);
     // step 6 — no question data to fill with, so it stops at pass 1 without spinning
     expect(kit.coverage.passes).toBe(1);
+    // step 8 — no usable flashcard data -> empty, no crash
+    expect(kit.flashcards).toEqual([]);
     // step 7 — no questions -> empty schedule, days_available preserved
     expect(kit.schedule).toEqual({ days_available: 5, days: [] });
   });

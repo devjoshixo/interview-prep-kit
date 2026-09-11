@@ -7,6 +7,7 @@ import { visitSite } from "./steps/visitSite";
 import { searchWeb } from "./steps/searchWeb";
 import { makeQuestions } from "./steps/makeQuestions";
 import { fillGaps } from "./steps/fillGaps";
+import { makeFlashcards } from "./steps/makeFlashcards";
 import { findUncovered } from "./coverage";
 import { allocateSchedule } from "./schedule";
 
@@ -36,6 +37,7 @@ export type MakeKitDeps = {
 //   [x] step 5 - coverage (set-difference: requirements no question references)
 //   [x] step 6 - fill gaps (generate-for-gaps + APPEND, capped loop)
 //   [x] step 7 - schedule (weighted sort + greedy pack, bounded to N days)
+//   [x] step 8 - flashcards (grounded recall cards from requirements)
 export async function makeKit(
   input: MakeKitInput,
   deps: MakeKitDeps = {}
@@ -71,6 +73,9 @@ export async function makeKit(
   // Step 5 — final coverage after gap-filling.
   const uncovered = findUncovered(role.requirements, questions);
 
+  // Step 8 — flashcards (grounded recall cards from the requirements).
+  const flashcards = await makeFlashcards(role.requirements, llm);
+
   // Step 7 — schedule the questions across the days available.
   const schedule = allocateSchedule(questions, input.days);
 
@@ -92,7 +97,7 @@ export async function makeKit(
       requirements: role.requirements,
     },
     questions,
-    flashcards: [],
+    flashcards,
     schedule,
     coverage: {
       uncovered_requirement_ids: uncovered,
