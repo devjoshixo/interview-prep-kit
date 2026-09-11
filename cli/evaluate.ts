@@ -13,7 +13,12 @@
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { makeKit } from "../src/core/pipeline";
+import { loadEnvFile } from "../src/lib/env";
 import type { BatchCase, BatchOutput, BatchResult } from "../src/core/types";
+
+// The CLI is not run through Next.js, so load .env.local ourselves before any
+// step reads a provider key. No-op if the file is absent (e.g. CI with real env).
+loadEnvFile(".env.local");
 
 const OUTPUT_VERSION = "1";
 

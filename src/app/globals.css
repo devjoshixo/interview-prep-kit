@@ -1,24 +1,90 @@
 @import "tailwindcss";
 
+/* Design tokens — see DESIGN.md (premium tier). */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #fcfcfd;
+  --bg-sunken: #f7f7f9;
+  --surface: #ffffff;
+  --ink: #0a0a0b;
+  --ink-2: #52525b;
+  --ink-3: #a1a1aa;
+  --border: #edecf0;
+  --border-strong: #dedee3;
+  --accent: #5b54f0;
+  --accent-hover: #4b44e0;
+  --accent-soft: #eeedfe;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-}
+  --color-bg: var(--bg);
+  --color-bg-sunken: var(--bg-sunken);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 16px;
+  --radius-btn: 10px;
+  --radius-chip: 8px;
+
+  --shadow-card: 0 1px 2px rgba(10, 10, 24, 0.04), 0 8px 24px -12px rgba(10, 10, 24, 0.12);
+  --shadow-pop: 0 12px 40px -12px rgba(10, 10, 24, 0.22);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04";
+}
+
+/* The signature gradient — top accent bar and primary CTA. */
+.accent-gradient {
+  background: linear-gradient(90deg, #7a6cff 0%, #5b54f0 50%, #7c3aed 100%);
+}
+.btn-gradient {
+  background: linear-gradient(135deg, #7a6cff 0%, #5b54f0 45%, #7c3aed 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 1px 2px rgba(10, 10, 24, 0.06),
+    0 10px 24px -10px rgba(91, 84, 240, 0.5);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.btn-gradient:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 2px 4px rgba(10, 10, 24, 0.08),
+    0 14px 30px -10px rgba(91, 84, 240, 0.6);
+}
+.btn-gradient:disabled {
+  opacity: 0.5;
+  transform: none;
+}
+
+/* Soft radial glow behind the hero. */
+.hero-glow {
+  position: absolute;
+  inset: -80px 0 auto 0;
+  height: 360px;
+  background: radial-gradient(
+    ellipse 60% 100% at 50% 0%,
+    rgba(91, 84, 240, 0.12),
+    rgba(124, 58, 237, 0.05) 45%,
+    transparent 72%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
