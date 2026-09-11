@@ -1,8 +1,11 @@
+import type { ReactNode } from "react";
 import { notFound, redirect } from "next/navigation";
 import { connectDB } from "../../../lib/db";
 import { KitModel } from "../../../models/kit";
 import { currentUserId } from "../../../lib/auth";
 import KitView from "../../_components/KitView";
+import GeneratingView from "../../_components/GeneratingView";
+import type { GenerationReport } from "../../../models/kit";
 import type { Kit } from "../../../core/types";
 
 export const runtime = "nodejs";
@@ -17,6 +20,11 @@ export default async function KitPage({ params }: PageProps<"/kit/[id]">) {
   await connectDB();
   type Doc = {
     userId?: string;
+    version?: number;
+    status?: string;
+    progress?: { step: number; label: string };
+    error?: string;
+    report?: GenerationReport | null;
     kit: Kit;
     editState?: Record<string, Record<string, "edited" | "user-created">>;
   };
@@ -28,12 +36,31 @@ export default async function KitPage({ params }: PageProps<"/kit/[id]">) {
   }
   if (!doc || doc.userId !== uid) notFound(); // owner-only
 
-  return (
+  const shell = (children: ReactNode) => (
     <main className="relative flex-1">
       <div className="hero-glow" />
-      <div className="relative mx-auto w-full max-w-[760px] px-5 py-12 sm:py-16">
-        <KitView kit={doc.kit} kitId={id} editState={doc.editState ?? {}} />
-      </div>
+      <div className="relative mx-auto w-full max-w-[760px] px-5 py-12 sm:py-16">{children}</div>
     </main>
+  );
+
+  if (doc.status && doc.status !== "ready") {
+    return shell(
+      <GeneratingView
+        kitId={id}
+        initialStep={doc.progress?.step ?? 0}
+        failed={doc.status === "failed"}
+        error={doc.error}
+      />
+    );
+  }
+
+  return shell(
+    <KitView
+      kit={doc.kit}
+      kitId={id}
+      editState={doc.editState ?? {}}
+      version={doc.version ?? 0}
+      report={doc.report ?? null}
+    />
   );
 }

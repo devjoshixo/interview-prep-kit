@@ -15,15 +15,20 @@ import type { Kit, Question, Flashcard } from "../../../../../core/types";
 export const runtime = "nodejs";
 export const maxDuration = 90;
 
-// POST /api/kits/[id]/regenerate  { section: "questions" | "flashcards" }
+const conflict = () =>
+  NextResponse.json({ error: "This kit changed elsewhere.", conflict: true }, { status: 409 });
+
+// POST /api/kits/[id]/regenerate  { section, version }
 //
-// Replaces ONLY the pristine items, keeping edited/user-created ones verbatim and
-// feeding deleted items back as an avoid-list. Questions cascade to coverage +
-// schedule (their ids are reassigned).
+// Replaces ONLY pristine items, keeps edited/user-created ones, avoids deleted.
+// Persisted via compare-and-swap on version so a concurrent edit can't be lost.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const { section } = (await req.json()) as { section?: "questions" | "flashcards" };
+    const { section, version } = (await req.json()) as {
+      section?: "questions" | "flashcards";
+      version?: number;
+    };
     if (section !== "questions" && section !== "flashcards") {
       return NextResponse.json({ error: "invalid section" }, { status: 400 });
     }
@@ -36,6 +41,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!doc || String(doc.userId) !== uid) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
+
+    const current = doc.version ?? 0;
+    if (typeof version === "number" && version !== current) return conflict();
 
     const kit = doc.kit as Kit;
     const editState = (doc.editState ?? {}) as Record<string, StatusMap>;
@@ -62,13 +70,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       editState[section] = merged.status;
     }
 
-    doc.kit = kit;
-    doc.editState = editState;
-    doc.markModified("kit");
-    doc.markModified("editState");
-    await doc.save();
+    // Compare-and-swap: the long LLM call ran on a snapshot; only commit if the
+    // stored version is still the one we started from.
+    const res = await KitModel.updateOne(
+      { _id: id, userId: uid, version: current },
+      { $set: { kit, editState }, $inc: { version: 1 } }
+    );
+    if (res.matchedCount === 0) return conflict();
 
-    return NextResponse.json({ kit: doc.kit, editState: doc.editState });
+    return NextResponse.json({ kit, editState, version: current + 1 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

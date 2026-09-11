@@ -24,6 +24,9 @@ export type MakeKitDeps = {
   llm?: LlmComplete;
   fetchPage?: FetchPage;
   search?: WebSearch;
+  // Optional progress hook — called before each step so a background runner can
+  // persist live progress. No-op by default (batch/tests don't pass it).
+  onProgress?: (step: number, label: string) => void | Promise<void>;
 };
 
 // The pipeline is built block by block. Steps land in order; each fills its own
@@ -45,24 +48,30 @@ export async function makeKit(
   const llm = deps.llm ?? complete;
   const fetchPage = deps.fetchPage ?? defaultFetchPage;
   const search = deps.search ?? tavilySearch;
+  const report = deps.onProgress ?? (() => {});
 
   // Step 1 — read the JD.
+  await report(1, "Reading the JD");
   const role = await readJd(input.jd, llm);
 
   // Step 2 — visit the site.
+  await report(2, "Visiting the site");
   const site = await visitSite(input.company_url, { fetchPage, llm });
 
   // Step 3 — search the web (enrich the brief; own-site data stays intact).
+  await report(3, "Searching the web");
   const brief = await searchWeb(
     { company: role.company, brief: site.brief },
     { search, llm }
   );
 
   // Step 4 — make questions (one batched LLM call per category).
+  await report(4, "Writing questions");
   const initialQuestions = await makeQuestions(role.requirements, brief, llm);
 
   // Step 6 — fill gaps: append questions for anything step 5's coverage flags
   // as uncovered, capped. (Step 5's findUncovered is the loop's coverage check.)
+  await report(5, "Filling coverage gaps");
   const { questions, passes } = await fillGaps(
     role.requirements,
     initialQuestions,
@@ -74,9 +83,11 @@ export async function makeKit(
   const uncovered = findUncovered(role.requirements, questions);
 
   // Step 8 — flashcards (grounded recall cards from the requirements).
+  await report(6, "Making flashcards");
   const flashcards = await makeFlashcards(role.requirements, llm);
 
   // Step 7 — schedule the questions across the days available.
+  await report(7, "Building the study plan");
   const schedule = allocateSchedule(questions, input.days);
 
   return {
