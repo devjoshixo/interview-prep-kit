@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
 import { makeKit } from "../../../core/pipeline";
+import { connectDB } from "../../../lib/db";
+import { KitModel } from "../../../models/kit";
 
 // The pipeline uses node APIs (fetch, cheerio) — force the Node.js runtime.
 export const runtime = "nodejs";
 // Give the long generation room on platforms that honour it (local dev ignores it).
 export const maxDuration = 90;
 
-// POST /api/kits  { jd, company_url, days } -> { kit }
+// POST /api/kits  { jd, company_url, days } -> { id, kit }
 //
-// NOTE: synchronous for now (waits for the whole pipeline). The designed
-// production shape is a background job + poll with progress persisted in Mongo;
-// that lands with persistence. This slice is for seeing the kit in a browser.
+// Runs the pipeline, saves the kit, and returns its id so the client can route
+// to /kit/[id]. Synchronous for now; the designed production shape is a
+// background job + poll (progress persisted in Mongo).
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
@@ -28,7 +30,11 @@ export async function POST(req: Request) {
     }
 
     const kit = await makeKit({ jd, company_url, days });
-    return NextResponse.json({ kit });
+
+    await connectDB();
+    const doc = await KitModel.create({ inputs: { jd, company_url, days }, kit });
+
+    return NextResponse.json({ id: String(doc._id), kit });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
