@@ -6,8 +6,8 @@
 //      invented ("hallucinated") requirements are dropped;
 //   2. must/nice priority is decided by CODE from the wording, not the model.
 
-import type { LlmComplete } from "../../lib/llm";
-import type { Requirement } from "../types";
+import type { LlmComplete } from '../../lib/llm';
+import type { Requirement } from '../types';
 
 export type RoleExtract = {
   company: string;
@@ -29,37 +29,44 @@ type RawForm = {
   requirements?: unknown;
 };
 
-const KINDS = new Set<Requirement["kind"]>(["technical", "behavioural", "domain"]);
+const KINDS = new Set<Requirement['kind']>([
+  'technical',
+  'behavioural',
+  'domain',
+]);
 
 // The form the model must fill. The provider enforces this shape in JSON mode.
 const FORM_SCHEMA = {
-  type: "object",
+  type: 'object',
   properties: {
-    company: { type: "string" },
-    role_title: { type: "string" },
-    location: { type: "string" },
-    seniority: { type: "string" },
-    responsibilities: { type: "array", items: { type: "string" } },
+    company: { type: 'string' },
+    role_title: { type: 'string' },
+    location: { type: 'string' },
+    seniority: { type: 'string' },
+    responsibilities: { type: 'array', items: { type: 'string' } },
     requirements: {
-      type: "array",
+      type: 'array',
       items: {
-        type: "object",
+        type: 'object',
         properties: {
-          text: { type: "string" },
-          kind: { type: "string", enum: ["technical", "behavioural", "domain"] },
-          evidence: { type: "string" },
+          text: { type: 'string' },
+          kind: {
+            type: 'string',
+            enum: ['technical', 'behavioural', 'domain'],
+          },
+          evidence: { type: 'string' },
         },
-        required: ["text", "kind", "evidence"],
+        required: ['text', 'kind', 'evidence'],
       },
     },
   },
   required: [
-    "company",
-    "role_title",
-    "location",
-    "seniority",
-    "responsibilities",
-    "requirements",
+    'company',
+    'role_title',
+    'location',
+    'seniority',
+    'responsibilities',
+    'requirements',
   ],
 };
 
@@ -67,21 +74,21 @@ const FORM_SCHEMA = {
 // model reflows spacing or casing. Exact-substring is too brittle; this is the
 // deliberate middle — grounded in the JD, tolerant of cosmetic drift.
 export function normalize(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, " ").trim();
+  return s.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 // CODE owns priority. "nice to have / preferred / bonus / a plus" => nice,
 // everything else defaults to must.
-export function derivePriority(text: string): Requirement["priority"] {
+export function derivePriority(text: string): Requirement['priority'] {
   return /\b(nice[ -]to[ -]have|preferred|bonus|a plus|is a plus|ideally|desirable)\b/i.test(
-    text
+    text,
   )
-    ? "nice"
-    : "must";
+    ? 'nice'
+    : 'must';
 }
 
 function asString(x: unknown): string {
-  return typeof x === "string" ? x.trim() : "";
+  return typeof x === 'string' ? x.trim() : '';
 }
 
 // PURE and deterministic — the unit under test. Keeps only requirements whose
@@ -89,7 +96,7 @@ function asString(x: unknown): string {
 // stay contiguous (req-1, req-2, ...).
 export function groundRequirements(
   jd: string,
-  raw: RawRequirement[]
+  raw: RawRequirement[],
 ): Requirement[] {
   const haystack = normalize(jd);
   const kept: Requirement[] = [];
@@ -99,9 +106,9 @@ export function groundRequirements(
     if (!text || !evidence) continue; // malformed box
     if (!haystack.includes(normalize(evidence))) continue; // invented -> drop
     const kind =
-      typeof r.kind === "string" && KINDS.has(r.kind as Requirement["kind"])
-        ? (r.kind as Requirement["kind"])
-        : "technical";
+      typeof r.kind === 'string' && KINDS.has(r.kind as Requirement['kind'])
+        ? (r.kind as Requirement['kind'])
+        : 'technical';
     kept.push({
       id: `req-${kept.length + 1}`,
       text,
@@ -114,35 +121,40 @@ export function groundRequirements(
 
 function asStringArray(x: unknown): string[] {
   if (!Array.isArray(x)) return [];
-  return x.filter((v): v is string => typeof v === "string").map((v) => v.trim());
+  return x
+    .filter((v): v is string => typeof v === 'string')
+    .map((v) => v.trim());
 }
 
 export function buildPrompt(jd: string): string {
   return [
-    "You are extracting structured facts from a job description (JD).",
-    "Fill the JSON form. Rules you MUST follow:",
-    "- For every requirement, copy an `evidence` string VERBATIM from the JD text",
-    "  below. Do not paraphrase the evidence. If you cannot find supporting text",
-    "  in the JD, do not include that requirement at all.",
-    "- Do not invent requirements, responsibilities, company, or location that are",
-    "  not present in the JD. Leave a field empty rather than guessing.",
-    "",
-    "JD:",
+    'You are extracting structured facts from a job description (JD).',
+    'Fill the JSON form. Rules you MUST follow:',
+    '- For every requirement, copy an `evidence` string VERBATIM from the JD text',
+    '  below. Do not paraphrase the evidence. If you cannot find supporting text',
+    '  in the JD, do not include that requirement at all.',
+    '- Do not invent requirements, responsibilities, company, or location that are',
+    '  not present in the JD. Leave a field empty rather than guessing.',
+    '',
+    'JD:',
     '"""',
     jd,
     '"""',
-  ].join("\n");
+  ].join('\n');
 }
 
 // The step: call the LLM, parse its form, then ground it in code.
-export async function readJd(jd: string, llm: LlmComplete): Promise<RoleExtract> {
+export async function readJd(
+  jd: string,
+  llm: LlmComplete,
+): Promise<RoleExtract> {
   const raw = await llm(buildPrompt(jd), { schema: FORM_SCHEMA });
 
   let form: RawForm;
   try {
     form = JSON.parse(raw) as RawForm;
   } catch {
-    throw new Error("readJd: LLM did not return valid JSON");
+    throw new Error('readJd: LLM did not return valid JSON');
   }
 
   const rawRequirements = Array.isArray(form.requirements)

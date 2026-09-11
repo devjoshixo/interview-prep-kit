@@ -5,6 +5,10 @@ import { tavilySearch, type WebSearch } from "../lib/tavily";
 import { readJd } from "./steps/readJd";
 import { visitSite } from "./steps/visitSite";
 import { searchWeb } from "./steps/searchWeb";
+import { makeQuestions } from "./steps/makeQuestions";
+import { fillGaps } from "./steps/fillGaps";
+import { findUncovered } from "./coverage";
+import { allocateSchedule } from "./schedule";
 
 // Input accepted by the pipeline. The owner may widen this as steps are added.
 export type MakeKitInput = {
@@ -28,10 +32,10 @@ export type MakeKitDeps = {
 //   [x] step 1 - read the JD (role, requirements, grounded evidence)
 //   [x] step 2 - visit the site (company brief, honest-none on failure)
 //   [x] step 3 - search the web (enrich brief summary + sources)
-//   [ ] step 4 - make questions
-//   [ ] step 5 - coverage
-//   [ ] step 6 - fill gaps
-//   [ ] step 7 - schedule
+//   [x] step 4 - make questions (per-category batches, grounded requirement ids)
+//   [x] step 5 - coverage (set-difference: requirements no question references)
+//   [x] step 6 - fill gaps (generate-for-gaps + APPEND, capped loop)
+//   [x] step 7 - schedule (weighted sort + greedy pack, bounded to N days)
 export async function makeKit(
   input: MakeKitInput,
   deps: MakeKitDeps = {}
@@ -52,6 +56,24 @@ export async function makeKit(
     { search, llm }
   );
 
+  // Step 4 — make questions (one batched LLM call per category).
+  const initialQuestions = await makeQuestions(role.requirements, brief, llm);
+
+  // Step 6 — fill gaps: append questions for anything step 5's coverage flags
+  // as uncovered, capped. (Step 5's findUncovered is the loop's coverage check.)
+  const { questions, passes } = await fillGaps(
+    role.requirements,
+    initialQuestions,
+    brief,
+    llm
+  );
+
+  // Step 5 — final coverage after gap-filling.
+  const uncovered = findUncovered(role.requirements, questions);
+
+  // Step 7 — schedule the questions across the days available.
+  const schedule = allocateSchedule(questions, input.days);
+
   return {
     source: {
       company: role.company,
@@ -69,15 +91,12 @@ export async function makeKit(
       responsibilities: role.responsibilities,
       requirements: role.requirements,
     },
-    questions: [],
+    questions,
     flashcards: [],
-    schedule: {
-      days_available: input.days,
-      days: [],
-    },
+    schedule,
     coverage: {
-      uncovered_requirement_ids: [],
-      passes: 0,
+      uncovered_requirement_ids: uncovered,
+      passes,
     },
   };
 }
