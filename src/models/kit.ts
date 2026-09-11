@@ -15,6 +15,7 @@ export type Tombstones = Partial<Record<string, string[]>>;
 export type KitDoc = {
   _id: string;
   userId: string;
+  version: number;
   inputs: { jd: string; company_url: string; days: number };
   kit: Kit;
   editState: EditState;
@@ -25,6 +26,9 @@ export type KitDoc = {
 const KitSchema = new Schema(
   {
     userId: { type: String, required: true, index: true },
+    // Optimistic-concurrency counter: every mutating write compare-and-swaps on
+    // this, so concurrent edits/regenerates can't silently lose an update.
+    version: { type: Number, default: 0 },
     inputs: {
       jd: { type: String, required: true },
       company_url: { type: String, default: "" },

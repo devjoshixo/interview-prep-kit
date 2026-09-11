@@ -18,7 +18,23 @@ function recomputeQuestionDependents(kit: Kit): void {
   kit.schedule = allocateSchedule(kit.questions, kit.schedule.days_available);
 }
 
-// PATCH /api/kits/[id]  { section, action: edit|delete|add, itemId?, patch?, item? }
+const conflict = () =>
+  NextResponse.json({ error: "This kit changed elsewhere.", conflict: true }, { status: 409 });
+
+// GET — the client refetches the latest after a version conflict.
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const uid = await currentUserId();
+  if (!uid) return NextResponse.json({ error: "sign in required" }, { status: 401 });
+  await connectDB();
+  const doc = (await KitModel.findById(id).lean().catch(() => null)) as
+    | { userId?: string; kit?: unknown; editState?: unknown; version?: number }
+    | null;
+  if (!doc || doc.userId !== uid) return NextResponse.json({ error: "not found" }, { status: 404 });
+  return NextResponse.json({ kit: doc.kit, editState: doc.editState ?? {}, version: doc.version ?? 0 });
+}
+
+// PATCH /api/kits/[id]  { section, action, itemId?, patch?, item?, version }
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
@@ -28,6 +44,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       itemId?: string;
       patch?: Record<string, unknown>;
       item?: Record<string, unknown>;
+      version?: number;
     };
     const section = body.section;
     if (!section || !SECTIONS.includes(section)) {
@@ -42,6 +59,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (!doc || String(doc.userId) !== uid) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
+
+    const current = doc.version ?? 0;
+    if (typeof body.version === "number" && body.version !== current) return conflict();
 
     const kit = doc.kit as Kit;
     const editState = (doc.editState ?? {}) as Record<string, EditMap>;
@@ -73,15 +93,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     if (section === "questions") recomputeQuestionDependents(kit);
 
-    doc.kit = kit;
-    doc.editState = editState;
-    doc.tombstones = tombstones;
-    doc.markModified("kit");
-    doc.markModified("editState");
-    doc.markModified("tombstones");
-    await doc.save();
+    // Compare-and-swap on version — fails if another writer committed meanwhile.
+    const res = await KitModel.updateOne(
+      { _id: id, userId: uid, version: current },
+      { $set: { kit, editState, tombstones }, $inc: { version: 1 } }
+    );
+    if (res.matchedCount === 0) return conflict();
 
-    return NextResponse.json({ kit: doc.kit, editState: doc.editState });
+    return NextResponse.json({ kit, editState, version: current + 1 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

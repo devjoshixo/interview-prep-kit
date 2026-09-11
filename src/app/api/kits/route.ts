@@ -38,7 +38,7 @@ export async function POST(req: Request) {
     await connectDB();
     const doc = await KitModel.create({ userId, inputs: { jd, company_url, days }, kit });
 
-    return NextResponse.json({ id: String(doc._id), kit });
+    return NextResponse.json({ id: String(doc._id), kit, version: doc.version ?? 0 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

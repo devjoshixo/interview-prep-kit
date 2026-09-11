@@ -39,13 +39,16 @@ export default function KitView({
   kit: initialKit,
   kitId,
   editState: initialEdit,
+  version: initialVersion,
 }: {
   kit: Kit;
   kitId: string;
   editState: EditState;
+  version: number;
 }) {
   const [kit, setKit] = useState(initialKit);
   const [editState, setEditState] = useState<EditState>(initialEdit);
+  const [version, setVersion] = useState(initialVersion);
   const [busy, setBusy] = useState<string | null>(null);
   const [dialog, setDialog] = useState<(DialogOpts & { resolve: (v: boolean) => void }) | null>(null);
   const ask: Ask = (opts) => new Promise((resolve) => setDialog({ ...opts, resolve }));
@@ -80,16 +83,38 @@ export default function KitView({
     }
   }, [kitId, knownQ, knownC]);
 
+  // On a version conflict (someone changed this kit elsewhere), reload the latest
+  // and tell the user — never silently clobber their other session's change.
+  async function reloadOnConflict(): Promise<void> {
+    const res = await fetch(`/api/kits/${kitId}`);
+    if (res.ok) {
+      const d = await res.json();
+      setKit(d.kit as Kit);
+      setEditState(d.editState as EditState);
+      setVersion(d.version as number);
+    }
+    await ask({
+      title: "Kit updated elsewhere",
+      message: "This kit was changed in another session, so we reloaded the latest. Please redo your change.",
+      confirmLabel: "OK",
+    });
+  }
+
   async function patch(body: Record<string, unknown>): Promise<boolean> {
     const res = await fetch(`/api/kits/${kitId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, version }),
     });
+    if (res.status === 409) {
+      await reloadOnConflict();
+      return false;
+    }
     const data = await res.json();
     if (res.ok) {
       setKit(data.kit as Kit);
       setEditState(data.editState as EditState);
+      setVersion(data.version as number);
     }
     return res.ok;
   }
@@ -107,12 +132,17 @@ export default function KitView({
       const res = await fetch(`/api/kits/${kitId}/regenerate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ section }),
+        body: JSON.stringify({ section, version }),
       });
+      if (res.status === 409) {
+        await reloadOnConflict();
+        return;
+      }
       const data = await res.json();
       if (res.ok) {
         setKit(data.kit as Kit);
         setEditState(data.editState as EditState);
+        setVersion(data.version as number);
       } else {
         await ask({ title: "Regenerate failed", message: data.error || "Please try again.", confirmLabel: "OK" });
       }
