@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { makeKit } from "../../../core/pipeline";
 import { connectDB } from "../../../lib/db";
 import { KitModel } from "../../../models/kit";
+import { currentUserId } from "../../../lib/auth";
 
 // The pipeline uses node APIs (fetch, cheerio) — force the Node.js runtime.
 export const runtime = "nodejs";
@@ -15,6 +16,9 @@ export const maxDuration = 90;
 // background job + poll (progress persisted in Mongo).
 export async function POST(req: Request) {
   try {
+    const userId = await currentUserId();
+    if (!userId) return NextResponse.json({ error: "sign in required" }, { status: 401 });
+
     const body = (await req.json()) as {
       jd?: unknown;
       company_url?: unknown;
@@ -32,7 +36,7 @@ export async function POST(req: Request) {
     const kit = await makeKit({ jd, company_url, days });
 
     await connectDB();
-    const doc = await KitModel.create({ inputs: { jd, company_url, days }, kit });
+    const doc = await KitModel.create({ userId, inputs: { jd, company_url, days }, kit });
 
     return NextResponse.json({ id: String(doc._id), kit });
   } catch (err) {

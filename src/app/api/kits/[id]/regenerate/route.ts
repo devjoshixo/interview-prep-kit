@@ -9,6 +9,7 @@ import {
 } from "../../../../../core/steps/regenerateSection";
 import { findUncovered } from "../../../../../core/coverage";
 import { allocateSchedule } from "../../../../../core/schedule";
+import { currentUserId } from "../../../../../lib/auth";
 import type { Kit, Question, Flashcard } from "../../../../../core/types";
 
 export const runtime = "nodejs";
@@ -27,9 +28,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: "invalid section" }, { status: 400 });
     }
 
+    const uid = await currentUserId();
+    if (!uid) return NextResponse.json({ error: "sign in required" }, { status: 401 });
+
     await connectDB();
     const doc = await KitModel.findById(id).catch(() => null);
-    if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
+    if (!doc || String(doc.userId) !== uid) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
 
     const kit = doc.kit as Kit;
     const editState = (doc.editState ?? {}) as Record<string, StatusMap>;
