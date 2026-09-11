@@ -9,6 +9,15 @@ type Status = "edited" | "user-created";
 type SectionEdit = Record<string, Status>;
 type EditState = { questions?: SectionEdit; flashcards?: SectionEdit };
 
+type DialogOpts = {
+  title: string;
+  message?: string;
+  confirmLabel: string;
+  cancelLabel?: string;
+  danger?: boolean;
+};
+type Ask = (opts: DialogOpts) => Promise<boolean>;
+
 const CATEGORY_META: Record<Question["category"], { label: string; dot: string }> = {
   technical: { label: "Technical", dot: "#4f63c4" },
   behavioural: { label: "Behavioural", dot: "#2f8f76" },
@@ -38,6 +47,12 @@ export default function KitView({
   const [kit, setKit] = useState(initialKit);
   const [editState, setEditState] = useState<EditState>(initialEdit);
   const [busy, setBusy] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<(DialogOpts & { resolve: (v: boolean) => void }) | null>(null);
+  const ask: Ask = (opts) => new Promise((resolve) => setDialog({ ...opts, resolve }));
+  const closeDialog = (v: boolean) => {
+    dialog?.resolve(v);
+    setDialog(null);
+  };
   const [tab, setTab] = useState<Tab>("Overview");
   const [knownQ, setKnownQ] = useState<Set<string>>(new Set());
   const [knownC, setKnownC] = useState<Set<string>>(new Set());
@@ -80,7 +95,13 @@ export default function KitView({
   }
 
   async function regenerate(section: "questions" | "flashcards") {
-    if (!confirm(`Regenerate untouched ${section}?\nYour edited and added items are kept.`)) return;
+    const ok = await ask({
+      title: `Regenerate ${section}?`,
+      message: "Your edited and added items are kept — only untouched ones are replaced.",
+      confirmLabel: "Regenerate",
+      cancelLabel: "Cancel",
+    });
+    if (!ok) return;
     setBusy(`regen:${section}`);
     try {
       const res = await fetch(`/api/kits/${kitId}/regenerate`, {
@@ -93,7 +114,7 @@ export default function KitView({
         setKit(data.kit as Kit);
         setEditState(data.editState as EditState);
       } else {
-        alert(data.error || "Regenerate failed");
+        await ask({ title: "Regenerate failed", message: data.error || "Please try again.", confirmLabel: "OK" });
       }
     } finally {
       setBusy(null);
@@ -175,6 +196,7 @@ export default function KitView({
             onPatch={patch}
             onRegenerate={() => regenerate("questions")}
             regenerating={busy === "regen:questions"}
+            ask={ask}
           />
         )}
         {tab === "Flashcards" && (
@@ -186,6 +208,7 @@ export default function KitView({
             onPatch={patch}
             onRegenerate={() => regenerate("flashcards")}
             regenerating={busy === "regen:flashcards"}
+            ask={ask}
           />
         )}
         {tab === "Plan" && <PlanTab kit={kit} />}
@@ -213,6 +236,43 @@ export default function KitView({
           </button>
         </div>
       </div>
+
+      {dialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-ink/30 backdrop-blur-sm" onClick={() => closeDialog(false)} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="reveal relative w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-pop"
+          >
+            <h3 className="font-display text-[1.15rem] font-semibold tracking-tight text-ink">
+              {dialog.title}
+            </h3>
+            {dialog.message && (
+              <p className="mt-2 text-[14px] leading-relaxed text-ink-2">{dialog.message}</p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              {dialog.cancelLabel && (
+                <button
+                  onClick={() => closeDialog(false)}
+                  className="rounded-full px-4 py-2 text-[13px] font-medium text-ink-2 transition hover:text-ink"
+                >
+                  {dialog.cancelLabel}
+                </button>
+              )}
+              <button
+                onClick={() => closeDialog(true)}
+                autoFocus
+                className={`rounded-full px-4 py-2 text-[13px] font-medium text-white transition ${
+                  dialog.danger ? "bg-[#c05663] hover:brightness-95" : "bg-accent hover:bg-accent-hover"
+                }`}
+              >
+                {dialog.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -267,6 +327,7 @@ function QuestionsTab({
   onPatch,
   onRegenerate,
   regenerating,
+  ask,
 }: {
   kit: Kit;
   status: SectionEdit;
@@ -275,6 +336,7 @@ function QuestionsTab({
   onPatch: (b: Record<string, unknown>) => Promise<boolean>;
   onRegenerate: () => void;
   regenerating: boolean;
+  ask: Ask;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggleOpen = (id: string) => setOpen((s) => toggleSet(s, id));
@@ -310,7 +372,16 @@ function QuestionsTab({
                     known={known.has(q.id)}
                     onToggleKnown={() => toggleKnown(q.id)}
                     onSave={(patch) => onPatch({ section: "questions", action: "edit", itemId: q.id, patch })}
-                    onDelete={() => onPatch({ section: "questions", action: "delete", itemId: q.id })}
+                    onDelete={async () => {
+                      const ok = await ask({
+                        title: "Delete question?",
+                        message: "It won't come back when you regenerate.",
+                        confirmLabel: "Delete",
+                        cancelLabel: "Cancel",
+                        danger: true,
+                      });
+                      if (ok) onPatch({ section: "questions", action: "delete", itemId: q.id });
+                    }}
                   />
                 ))}
               </ul>
@@ -353,7 +424,7 @@ function EditableQuestion({
   known: boolean;
   onToggleKnown: () => void;
   onSave: (patch: Record<string, unknown>) => Promise<boolean>;
-  onDelete: () => Promise<boolean>;
+  onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [prompt, setPrompt] = useState(q.prompt);
@@ -406,12 +477,7 @@ function EditableQuestion({
         </button>
         <span className="flex-1" />
         <button onClick={() => setEditing(true)} className="text-ink-3 transition hover:text-ink-2">Edit</button>
-        <button
-          onClick={() => {
-            if (confirm("Delete this question?")) onDelete();
-          }}
-          className="text-ink-3 transition hover:text-[#c05663]"
-        >
+        <button onClick={onDelete} className="text-ink-3 transition hover:text-[#c05663]">
           Delete
         </button>
       </div>
@@ -429,6 +495,7 @@ function FlashcardsTab({
   onPatch,
   onRegenerate,
   regenerating,
+  ask,
 }: {
   kit: Kit;
   status: SectionEdit;
@@ -437,6 +504,7 @@ function FlashcardsTab({
   onPatch: (b: Record<string, unknown>) => Promise<boolean>;
   onRegenerate: () => void;
   regenerating: boolean;
+  ask: Ask;
 }) {
   return (
     <div>
@@ -459,7 +527,16 @@ function FlashcardsTab({
               known={known.has(f.id)}
               onToggleKnown={() => setKnown((s) => toggleSet(s, f.id))}
               onSave={(patch) => onPatch({ section: "flashcards", action: "edit", itemId: f.id, patch })}
-              onDelete={() => onPatch({ section: "flashcards", action: "delete", itemId: f.id })}
+              onDelete={async () => {
+                const ok = await ask({
+                  title: "Delete flashcard?",
+                  message: "It won't come back when you regenerate.",
+                  confirmLabel: "Delete",
+                  cancelLabel: "Cancel",
+                  danger: true,
+                });
+                if (ok) onPatch({ section: "flashcards", action: "delete", itemId: f.id });
+              }}
             />
           ))}
         </div>
@@ -489,7 +566,7 @@ function EditableFlashcard({
   known: boolean;
   onToggleKnown: () => void;
   onSave: (patch: Record<string, unknown>) => Promise<boolean>;
-  onDelete: () => Promise<boolean>;
+  onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [flipped, setFlipped] = useState(false);
@@ -542,12 +619,7 @@ function EditableFlashcard({
         <StatusTag status={status} />
         <span className="flex-1" />
         <button onClick={() => setEditing(true)} className="text-ink-3 transition hover:text-ink-2">Edit</button>
-        <button
-          onClick={() => {
-            if (confirm("Delete this flashcard?")) onDelete();
-          }}
-          className="text-ink-3 transition hover:text-[#c05663]"
-        >
+        <button onClick={onDelete} className="text-ink-3 transition hover:text-[#c05663]">
           Delete
         </button>
       </div>
