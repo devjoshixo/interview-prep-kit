@@ -5,6 +5,7 @@ import { KitModel } from "../../../models/kit";
 import { currentUserId } from "../../../lib/auth";
 import KitView from "../../_components/KitView";
 import GeneratingView from "../../_components/GeneratingView";
+import type { GenerationReport } from "../../../models/kit";
 import type { Kit } from "../../../core/types";
 
 export const runtime = "nodejs";
@@ -23,6 +24,7 @@ export default async function KitPage({ params }: PageProps<"/kit/[id]">) {
     status?: string;
     progress?: { step: number; label: string };
     error?: string;
+    report?: GenerationReport | null;
     kit: Kit;
     editState?: Record<string, Record<string, "edited" | "user-created">>;
   };
@@ -53,6 +55,12 @@ export default async function KitPage({ params }: PageProps<"/kit/[id]">) {
   }
 
   return shell(
-    <KitView kit={doc.kit} kitId={id} editState={doc.editState ?? {}} version={doc.version ?? 0} />
+    <KitView
+      kit={doc.kit}
+      kitId={id}
+      editState={doc.editState ?? {}}
+      version={doc.version ?? 0}
+      report={doc.report ?? null}
+    />
   );
 }

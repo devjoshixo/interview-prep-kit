@@ -36,6 +36,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         status?: string;
         progress?: { step: number; label: string };
         error?: string;
+        report?: unknown;
       }
     | null;
   if (!doc || doc.userId !== uid) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -43,6 +44,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     status: doc.status ?? "ready",
     progress: doc.progress ?? { step: 0, label: "" },
     error: doc.error ?? null,
+    report: doc.report ?? null,
     kit: doc.kit,
     editState: doc.editState ?? {},
     version: doc.version ?? 0,

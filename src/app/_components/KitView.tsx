@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import type { GenerationReport } from "../../models/kit";
 import type { Kit, Question, Flashcard } from "../../core/types";
 
 type Status = "edited" | "user-created";
@@ -40,11 +41,13 @@ export default function KitView({
   kitId,
   editState: initialEdit,
   version: initialVersion,
+  report,
 }: {
   kit: Kit;
   kitId: string;
   editState: EditState;
   version: number;
+  report: GenerationReport | null;
 }) {
   const [kit, setKit] = useState(initialKit);
   const [editState, setEditState] = useState<EditState>(initialEdit);
@@ -216,7 +219,7 @@ export default function KitView({
       </div>
 
       <div className="mt-8">
-        {tab === "Overview" && <Overview kit={kit} />}
+        {tab === "Overview" && <Overview kit={kit} report={report} />}
         {tab === "Questions" && (
           <QuestionsTab
             kit={kit}
@@ -309,9 +312,10 @@ export default function KitView({
 
 /* ---------- Overview ---------- */
 
-function Overview({ kit }: { kit: Kit }) {
+function Overview({ kit, report }: { kit: Kit; report: GenerationReport | null }) {
   return (
     <div className="space-y-12">
+      {report && report.steps?.length > 0 && <GenerationCard report={report} />}
       <Section title="Company brief">
         {kit.company_brief.summary || kit.company_brief.what_they_do ? (
           <div className="space-y-3 text-[15px] leading-relaxed text-ink-2">
@@ -828,6 +832,38 @@ function Check({ on }: { on: boolean }) {
       <circle cx="10" cy="10" r="8.25" stroke="currentColor" strokeWidth="1.5" fill={on ? "currentColor" : "none"} />
       <path d="M6.5 10.2l2.2 2.2 4.6-4.6" stroke={on ? "#fff" : "currentColor"} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+function GenerationCard({ report }: { report: GenerationReport }) {
+  const max = Math.max(...report.steps.map((s) => s.ms), 1);
+  return (
+    <section className="rounded-xl border border-border bg-surface p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-[13px] font-medium text-ink">
+          Generated in {(report.durationMs / 1000).toFixed(1)}s
+        </span>
+        <span className="text-[12px] text-ink-3">
+          {[report.provider, report.model].filter(Boolean).join(" / ")}
+        </span>
+      </div>
+      <ul className="mt-3 space-y-1.5">
+        {report.steps.map((s) => (
+          <li key={s.step} className="flex items-center gap-3 text-[12px]">
+            <span className="w-36 shrink-0 truncate text-ink-2">{s.label}</span>
+            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg-sunken">
+              <span
+                className="block h-full rounded-full bg-accent/50"
+                style={{ width: `${Math.round((s.ms / max) * 100)}%` }}
+              />
+            </span>
+            <span className="tabular w-12 shrink-0 text-right text-ink-3">
+              {(s.ms / 1000).toFixed(1)}s
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

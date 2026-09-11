@@ -14,6 +14,13 @@ export type Tombstones = Partial<Record<string, string[]>>;
 
 export type JobStatus = "generating" | "ready" | "failed";
 
+export type GenerationReport = {
+  durationMs: number;
+  steps: { step: number; label: string; ms: number }[];
+  provider?: string;
+  model?: string;
+};
+
 export type KitDoc = {
   _id: string;
   userId: string;
@@ -21,6 +28,7 @@ export type KitDoc = {
   status: JobStatus;
   progress: { step: number; label: string };
   error?: string;
+  report?: GenerationReport | null;
   inputs: { jd: string; company_url: string; days: number };
   kit: Kit;
   editState: EditState;
@@ -38,6 +46,7 @@ const KitSchema = new Schema(
     status: { type: String, enum: ["generating", "ready", "failed"], default: "ready" },
     progress: { type: Schema.Types.Mixed, default: () => ({ step: 0, label: "" }) },
     error: { type: String },
+    report: { type: Schema.Types.Mixed, default: null },
     inputs: {
       jd: { type: String, required: true },
       company_url: { type: String, default: "" },
