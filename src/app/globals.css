@@ -2,14 +2,14 @@
 
 /* Design tokens — see DESIGN.md (premium tier). */
 :root {
-  --bg: #fcfcfd;
-  --bg-sunken: #f7f7f9;
+  --bg: #fbfaf8;
+  --bg-sunken: #f4f3ef;
   --surface: #ffffff;
-  --ink: #0a0a0b;
-  --ink-2: #52525b;
-  --ink-3: #a1a1aa;
-  --border: #edecf0;
-  --border-strong: #dedee3;
+  --ink: #191817;
+  --ink-2: #57544e;
+  --ink-3: #9c9890;
+  --border: #eceae4;
+  --border-strong: #ddd9d1;
   --accent: #5b54f0;
   --accent-hover: #4b44e0;
   --accent-soft: #eeedfe;
@@ -87,4 +87,42 @@ body {
 
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* Flashcard 3D flip */
+.flip {
+  perspective: 1200px;
+}
+.flip-inner {
+  position: relative;
+  height: 100%;
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transform-style: preserve-3d;
+}
+.flip-inner.flipped {
+  transform: rotateY(180deg);
+}
+.flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.flip-back {
+  transform: rotateY(180deg);
+}
+
+/* Gentle reveal for answers */
+.reveal {
+  animation: reveal 0.22s ease-out;
+}
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }

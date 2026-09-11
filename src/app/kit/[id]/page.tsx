@@ -23,7 +23,7 @@ export default async function KitPage({ params }: PageProps<"/kit/[id]">) {
     <main className="relative flex-1">
       <div className="hero-glow" />
       <div className="relative mx-auto w-full max-w-[760px] px-5 py-12 sm:py-16">
-        <KitView kit={doc.kit} />
+        <KitView kit={doc.kit} kitId={id} />
       </div>
     </main>
   );
