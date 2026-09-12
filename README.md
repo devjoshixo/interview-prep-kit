@@ -73,10 +73,12 @@ isolated so one failure doesn't abort the run):
 npm run evaluate -- --input cli/cases.example.json --output kits.json
 ```
 
-**Deployed:** any long-running Node host (Render / Railway) + MongoDB Atlas. Set
-the same env vars in the host's dashboard (for production I use
-`LLM_PROVIDER=gemini`). A long-running server is used deliberately — see
-*Design decisions*.
+**Deployed:** Vercel (with **Fluid Compute** enabled) + MongoDB Atlas. Set the
+same env vars in the project's dashboard. Fluid Compute raises the function
+budget to 300s so a ~30s generation finishes comfortably inside one invocation
+via `after()`; every outbound call is independently timed out and a watchdog
+reconciles any job that still dies mid-run — see *Design decisions*. Portable to
+any long-running Node host (Render / Railway) with no code change.
 
 ---
 
@@ -226,9 +228,18 @@ of, alongside the engineering depth in *Design decisions*.
   the trade-off is that a fully client-rendered site yields a thin (honest) brief.
 - **Provider-agnostic LLM.** One interface, two providers, swappable by env — dev
   on Groq, prod on Gemini.
-- **Background job + poll**, on a long-running server rather than serverless, so a
-  90-second generation isn't killed by a function timeout and the user sees live
-  progress.
+- **Background job + poll.** `POST /api/kits` returns an id instantly and the
+  pipeline runs in `after()`, writing per-step progress the client polls. Deployed
+  on Vercel with **Fluid Compute** (300s budget) so a generation isn't killed by
+  the default serverless timeout; the same code runs unchanged on a long-running
+  host (Render / Railway), which has no per-request cap at all.
+- **Resilience: bounded, self-healing generation.** Every outbound call (LLM,
+  site fetch, search) has its own `AbortController` timeout, so a hung upstream
+  can't consume the function budget — it degrades to honest-none instead. If a
+  run still dies (a genuine platform kill), a **watchdog** on the status endpoint
+  reconciles the stuck job to `failed`, and the client **auto-retries once**
+  silently before ever showing a failure — so a transient blip self-heals and the
+  progress view can never spin forever.
 - **Optimistic concurrency (CAS on version)** to prevent lost updates on concurrent
   edits/regenerates.
 - **Minimal-but-real auth** — scoped to ownership + privacy, not a full identity
