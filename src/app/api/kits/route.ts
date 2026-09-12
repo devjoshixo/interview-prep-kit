@@ -1,48 +1,16 @@
 import { NextResponse, after } from "next/server";
-import { makeKit } from "../../../core/pipeline";
 import { connectDB } from "../../../lib/db";
 import { KitModel } from "../../../models/kit";
 import { currentUserId } from "../../../lib/auth";
+import { runGeneration } from "../../../lib/generate";
 
 export const runtime = "nodejs";
-// Vercel Hobby caps serverless functions at 60s; a Groq generation is ~18s.
-export const maxDuration = 60;
-
-type Input = { jd: string; company_url: string; days: number };
-
-// Runs the pipeline in the background, persisting progress each step, then marks
-// the job ready (or failed). Fire-and-forget on a long-running server.
-async function runGeneration(id: string, input: Input): Promise<void> {
-  const t0 = Date.now();
-  const steps: { step: number; label: string; ms: number }[] = [];
-  const starts: { step: number; label: string; t: number }[] = [];
-  try {
-    const kit = await makeKit(input, {
-      onProgress: async (step, label) => {
-        const now = Date.now();
-        const prev = starts[starts.length - 1];
-        if (prev) steps.push({ step: prev.step, label: prev.label, ms: now - prev.t });
-        starts.push({ step, label, t: now });
-        await KitModel.updateOne({ _id: id }, { $set: { progress: { step, label } } });
-      },
-    });
-    const finalPrev = starts[starts.length - 1];
-    if (finalPrev) steps.push({ step: finalPrev.step, label: finalPrev.label, ms: Date.now() - finalPrev.t });
-    const report = {
-      durationMs: Date.now() - t0,
-      steps,
-      provider: process.env.LLM_PROVIDER,
-      model: process.env.LLM_MODEL,
-    };
-    await KitModel.updateOne(
-      { _id: id },
-      { $set: { kit, status: "ready", progress: { step: 8, label: "Ready" }, report } }
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "generation failed";
-    await KitModel.updateOne({ _id: id }, { $set: { status: "failed", error: message } });
-  }
-}
+// With Fluid Compute enabled, Hobby allows up to 300s. A generation is ~18-30s;
+// this headroom means a slow-but-healthy run finishes instead of being killed.
+// Every outbound call is independently timed out (see src/lib/timeout.ts) so a
+// hung upstream can't consume this budget, and a watchdog (GET /api/kits/[id])
+// reconciles any job that still dies mid-run.
+export const maxDuration = 300;
 
 // POST /api/kits  { jd, company_url, days } -> { id }
 // Creates a generating job and returns immediately; the client polls /api/kits/[id].

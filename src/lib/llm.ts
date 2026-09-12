@@ -7,6 +7,8 @@
 //   LLM_API_KEY   - key for the chosen provider
 //   LLM_MODEL     - model id (provider default used if unset)
 
+import { fetchWithTimeout } from "./timeout";
+
 export type LlmComplete = (
   prompt: string,
   opts?: { schema?: unknown }
@@ -22,6 +24,9 @@ const DEFAULT_MODEL: Record<string, string> = {
 // Transient failures worth retrying: rate limit, overload, gateway errors.
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 529]);
 const MAX_ATTEMPTS = 4;
+// A single provider call that never responds must not hang the job. On abort the
+// fetch throws and is treated as a transient network error (retried below).
+const LLM_TIMEOUT_MS = 20_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Exponential backoff with jitter: ~0.5s, 1s, 2s.
@@ -129,7 +134,7 @@ export const complete: LlmComplete = async (prompt, opts) => {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     let res: Response;
     try {
-      res = await fetch(call.url, call.init);
+      res = await fetchWithTimeout(call.url, call.init, LLM_TIMEOUT_MS);
     } catch (err) {
       lastError = err instanceof Error ? err.message : "network error";
       if (attempt < MAX_ATTEMPTS) {

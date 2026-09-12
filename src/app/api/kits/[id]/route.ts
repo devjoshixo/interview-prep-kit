@@ -21,7 +21,14 @@ function recomputeQuestionDependents(kit: Kit): void {
 const conflict = () =>
   NextResponse.json({ error: "This kit changed elsewhere.", conflict: true }, { status: 409 });
 
-// GET — the client refetches the latest after a version conflict.
+// Watchdog threshold. Must exceed the generation route's maxDuration (300s) so a
+// legitimately slow-but-healthy run is never falsely reaped; this only catches a
+// job whose function was hard-killed (OOM / cold-start death) before its own
+// catch could write status:"failed", which would otherwise poll forever.
+const STUCK_MS = 6 * 60 * 1000;
+const STUCK_MSG = "Generation stopped unexpectedly. Please try again.";
+
+// GET — polled by GeneratingView for progress, and refetched after a 409.
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const uid = await currentUserId();
@@ -37,13 +44,32 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         progress?: { step: number; label: string };
         error?: string;
         report?: unknown;
+        createdAt?: Date | string;
       }
     | null;
   if (!doc || doc.userId !== uid) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // Reconcile a job that died mid-run: still "generating" long past the budget
+  // means the pipeline's own failure write never ran. Flip it to "failed" (guarded
+  // on status so we never race a job that is finishing) so the client stops.
+  let status = doc.status ?? "ready";
+  let error = doc.error ?? null;
+  if (status === "generating" && doc.createdAt) {
+    const age = Date.now() - new Date(doc.createdAt).getTime();
+    if (age > STUCK_MS) {
+      await KitModel.updateOne(
+        { _id: id, status: "generating" },
+        { $set: { status: "failed", error: STUCK_MSG } }
+      );
+      status = "failed";
+      error = STUCK_MSG;
+    }
+  }
+
   return NextResponse.json({
-    status: doc.status ?? "ready",
+    status,
     progress: doc.progress ?? { step: 0, label: "" },
-    error: doc.error ?? null,
+    error,
     report: doc.report ?? null,
     kit: doc.kit,
     editState: doc.editState ?? {},

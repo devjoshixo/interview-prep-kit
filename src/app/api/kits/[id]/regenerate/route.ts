@@ -13,7 +13,9 @@ import { currentUserId } from "../../../../../lib/auth";
 import type { Kit, Question, Flashcard } from "../../../../../core/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 90;
+// Regenerate is a single grounded LLM call; with Fluid Compute enabled Hobby
+// allows up to 300s, and the LLM call is itself timed out (src/lib/timeout.ts).
+export const maxDuration = 300;
 
 const conflict = () =>
   NextResponse.json({ error: "This kit changed elsewhere.", conflict: true }, { status: 409 });

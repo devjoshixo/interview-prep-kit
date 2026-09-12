@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -29,6 +29,23 @@ export default function GeneratingView({
   const [step, setStep] = useState(initialStep);
   const [isFailed, setIsFailed] = useState(failed);
   const [failMsg, setFailMsg] = useState(error ?? "");
+  const [retrying, setRetrying] = useState(false);
+  // One silent auto-retry per run; `healing` suppresses stale "failed" polls
+  // while a retry request is flipping the job back to "generating".
+  const autoRetried = useRef(false);
+  const healing = useRef(false);
+
+  // Re-run the existing job. Resolves true once the server has flipped it back to
+  // "generating" (the endpoint awaits that write before responding).
+  async function requestRetry(): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/kits/${kitId}/retry`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      return res.ok && d.ok === true;
+    } catch {
+      return false;
+    }
+  }
 
   useEffect(() => {
     if (isFailed) return;
@@ -40,11 +57,32 @@ export default function GeneratingView({
         const d = await res.json();
         if (!alive) return;
         if (typeof d.progress?.step === "number") setStep(d.progress.step);
+
         if (d.status === "ready") {
+          healing.current = false;
           router.refresh(); // server page re-renders with the finished kit
         } else if (d.status === "failed") {
-          setIsFailed(true);
-          setFailMsg(d.error || "Generation failed.");
+          if (healing.current) return; // a retry is in flight; ignore stale state
+          if (!autoRetried.current) {
+            // Self-heal: a transient blip re-runs invisibly. Only surface the
+            // failure screen if the automatic retry also can't restart the job.
+            autoRetried.current = true;
+            healing.current = true;
+            setStep(0);
+            const ok = await requestRetry();
+            if (!ok) {
+              healing.current = false;
+              if (alive) {
+                setIsFailed(true);
+                setFailMsg(d.error || "Generation failed.");
+              }
+            }
+          } else {
+            setIsFailed(true);
+            setFailMsg(d.error || "Generation failed.");
+          }
+        } else {
+          healing.current = false; // generating
         }
       } catch {
         /* transient — keep polling */
@@ -58,6 +96,19 @@ export default function GeneratingView({
     };
   }, [kitId, isFailed, router]);
 
+  async function onManualRetry() {
+    setRetrying(true);
+    const ok = await requestRetry();
+    if (ok) {
+      autoRetried.current = false; // give the fresh run its own auto-heal
+      healing.current = false;
+      setFailMsg("");
+      setStep(0);
+      setIsFailed(false); // re-arms the polling effect
+    }
+    setRetrying(false);
+  }
+
   if (isFailed) {
     return (
       <div className="mx-auto max-w-md py-24 text-center">
@@ -65,12 +116,21 @@ export default function GeneratingView({
           Generation failed
         </h1>
         <p className="mt-2 text-[14px] text-ink-2">{failMsg}</p>
-        <Link
-          href="/"
-          className="mt-6 inline-block rounded-full border border-border bg-surface px-5 py-2.5 text-sm font-medium text-ink transition hover:border-border-strong"
-        >
-          Try again
-        </Link>
+        <div className="mt-6 flex items-center justify-center gap-3">
+          <button
+            onClick={onManualRetry}
+            disabled={retrying}
+            className="rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-60"
+          >
+            {retrying ? "Retrying…" : "Retry"}
+          </button>
+          <Link
+            href="/"
+            className="rounded-full border border-border bg-surface px-5 py-2.5 text-sm font-medium text-ink transition hover:border-border-strong"
+          >
+            Start over
+          </Link>
+        </div>
       </div>
     );
   }
