@@ -40,6 +40,17 @@ const LINK_WEIGHTS: { pattern: RegExp; weight: number }[] = [
 
 const EMPTY_BRIEF: CompanyBrief = { summary: "", what_they_do: "", sources: [] };
 
+// The most common user input is a bare host ("acme.com"), which throws in both
+// `new URL()` and `fetch` — silently yielding an empty brief. Prepend https:// so
+// a scheme-less URL still works; leave an explicit scheme alone; keep blank blank
+// (honest-none — never fabricate a URL the user didn't give).
+export function normalizeCompanyUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed; // has a scheme
+  return `https://${trimmed}`;
+}
+
 function asString(x: unknown): string {
   return typeof x === "string" ? x.trim() : "";
 }
@@ -162,10 +173,14 @@ async function summarizeBrief(
 }
 
 export async function visitSite(
-  companyUrl: string,
+  rawCompanyUrl: string,
   deps: VisitDeps
 ): Promise<VisitResult> {
   const { fetchPage, llm } = deps;
+  const companyUrl = normalizeCompanyUrl(rawCompanyUrl);
+  if (!companyUrl) {
+    return { brief: EMPTY_BRIEF, pages_used: [] }; // no URL given
+  }
 
   const homeHtml = await fetchPage(companyUrl);
   if (!homeHtml) {

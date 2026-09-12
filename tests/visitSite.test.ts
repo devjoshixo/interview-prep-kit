@@ -4,6 +4,7 @@ import {
   extractLinks,
   extractText,
   visitSite,
+  normalizeCompanyUrl,
 } from "../src/core/steps/visitSite";
 import type { LlmComplete } from "../src/lib/llm";
 import type { FetchPage } from "../src/lib/http";
@@ -105,5 +106,37 @@ describe("visitSite (orchestration, with injected fake fetch + LLM)", () => {
     expect(res.brief.summary).toBe("");
     expect(res.brief.what_they_do).toBe("");
     expect(res.pages_used).toEqual(["https://acme.com"]);
+  });
+});
+
+describe("normalizeCompanyUrl (M1 — a scheme-less URL must not silently break the brief)", () => {
+  it("prepends https:// when there is no scheme", () => {
+    expect(normalizeCompanyUrl("acme.com")).toBe("https://acme.com");
+    expect(normalizeCompanyUrl("www.acme.com")).toBe("https://www.acme.com");
+  });
+
+  it("leaves an existing http(s) scheme untouched", () => {
+    expect(normalizeCompanyUrl("https://acme.com")).toBe("https://acme.com");
+    expect(normalizeCompanyUrl("http://acme.com")).toBe("http://acme.com");
+  });
+
+  it("trims, and returns empty for blank input (honest-none, no fake URL)", () => {
+    expect(normalizeCompanyUrl("  acme.com ")).toBe("https://acme.com");
+    expect(normalizeCompanyUrl("")).toBe("");
+    expect(normalizeCompanyUrl("   ")).toBe("");
+  });
+});
+
+describe("visitSite normalizes a scheme-less URL before fetching (M1)", () => {
+  it("fetches https://acme.com when given bare 'acme.com'", async () => {
+    const html: Record<string, string> = {
+      "https://acme.com": "<body>Acme builds payment rails.</body>",
+    };
+    const fetchPage: FetchPage = async (u) => html[u] ?? null;
+    const llm: LlmComplete = async () =>
+      JSON.stringify({ summary: "Acme.", what_they_do: "Payments." });
+    const res = await visitSite("acme.com", { fetchPage, llm });
+    expect(res.pages_used).toEqual(["https://acme.com"]);
+    expect(res.brief.what_they_do).toBe("Payments.");
   });
 });
