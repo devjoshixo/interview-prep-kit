@@ -50,23 +50,22 @@ describe("fetchWithTimeout (the mechanism)", () => {
   });
 });
 
-describe("fetchPage against a hung site (the exact failure, end to end)", () => {
-  it("returns null (honest-none) instead of hanging forever", async () => {
-    const url = await hangingServer();
+describe("fetchPage SSRF guard (refuses private / loopback hosts)", () => {
+  it("returns null immediately for a loopback host, without fetching it", async () => {
+    const url = await hangingServer(); // bound to 127.0.0.1 — a blocked range
     const start = Date.now();
-    const html = await fetchPage(url); // uses the real 8s PAGE_TIMEOUT_MS
+    const html = await fetchPage(url);
     const elapsed = Date.now() - start;
-    expect(html).toBeNull(); // degraded to honest-none, no crash
-    // Proof it actually timed out (waited ~the 8s budget) rather than resolving
-    // instantly for some other reason — and crucially, it DID return.
-    expect(elapsed).toBeGreaterThan(7000);
-    expect(elapsed).toBeLessThan(12000);
-  }, 15000); // per-test timeout must exceed the 8s call it is measuring
+    expect(html).toBeNull(); // refused → honest-none, no crash
+    // Blocked by the SSRF guard before the 8s fetch even starts — a loopback URL
+    // (or cloud-metadata / private LAN) can never be reached from the server.
+    expect(elapsed).toBeLessThan(2000);
+  });
 });
 
-describe("full generation with a hung company site (the failure, at job level)", () => {
+describe("full generation with an unreachable company site (the failure, at job level)", () => {
   it("completes in bounded time with an honest-none brief instead of stalling", async () => {
-    const hungUrl = await hangingServer();
+    const hungUrl = await hangingServer(); // loopback — refused by the SSRF guard
     // Minimal fake LLM: real role from step 1, then "[]" for every later call —
     // isolates the test to the site hang, no tokens spent, deterministic.
     const STEP1 = JSON.stringify({
@@ -84,7 +83,7 @@ describe("full generation with a hung company site (the failure, at job level)",
     const start = Date.now();
     const kit = await makeKit(
       { jd: "We need strong Go experience.", company_url: hungUrl, days: 5 },
-      { llm, fetchPage, search } // real fetchPage hits the hung server, times out at 8s
+      { llm, fetchPage, search } // real fetchPage refuses the loopback host -> honest-none
     );
     const elapsed = Date.now() - start;
 
