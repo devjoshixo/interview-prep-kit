@@ -38,3 +38,4 @@ next-env.d.ts
 # private design notes, not part of submission
 DESIGN.html
 .env.deploy
+.env*

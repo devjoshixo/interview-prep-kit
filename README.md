@@ -4,7 +4,7 @@ Turn a job description + company URL + days-until-interview into a tailored,
 editable, practisable interview prep kit: a company brief, tagged requirements, a
 categorised question bank, flashcards, and a day-by-day study plan.
 
-Live demo: _<add deploy URL>_ · Batch entrypoint: `npm run evaluate`
+Live demo: **https://interview-prep-kit-sigma.vercel.app** · Batch entrypoint: `npm run evaluate`
 
 ---
 
