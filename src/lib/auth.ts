@@ -20,7 +20,15 @@ export function verifyPassword(password: string, hash: string, salt: string): bo
 }
 
 function secret(): string {
-  return process.env.SESSION_SECRET || "insecure-dev-secret-change-me";
+  const s = process.env.SESSION_SECRET;
+  if (s) return s;
+  // Fail closed in production: without a real secret, session cookies would be
+  // signed with a public default and thus forgeable. Never do that in a deployed
+  // environment. The dev/test fallback keeps local work friction-free.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("SESSION_SECRET is not set — refusing to sign sessions with a default secret");
+  }
+  return "insecure-dev-secret-change-me";
 }
 
 export function signSession(userId: string): string {
