@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "../../../../../lib/db";
 import { KitModel } from "../../../../../models/kit";
 import { complete } from "../../../../../lib/llm";
-import { partition, mergeSection, type StatusMap } from "../../../../../core/regenerate";
+import { partition, mergeSection, reconcileFresh, type StatusMap } from "../../../../../core/regenerate";
 import {
   regenerateQuestions,
   regenerateFlashcards,
@@ -58,7 +58,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const { locked, pristine } = partition(kit.questions, status);
       const keep = locked.map((l) => l.item.prompt);
       const fresh = await regenerateQuestions(requirements, keep, avoid, pristine.length, complete);
-      const merged = mergeSection<Question>(locked, fresh, "q");
+      // Never let a short/empty LLM result silently shrink the section.
+      const merged = mergeSection<Question>(locked, reconcileFresh(fresh, pristine), "q");
       kit.questions = merged.items;
       kit.coverage.uncovered_requirement_ids = findUncovered(requirements, kit.questions);
       kit.schedule = allocateSchedule(kit.questions, kit.schedule.days_available);
@@ -67,7 +68,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const { locked, pristine } = partition(kit.flashcards, status);
       const keep = locked.map((l) => l.item.front);
       const fresh = await regenerateFlashcards(requirements, keep, avoid, pristine.length, complete);
-      const merged = mergeSection<Flashcard>(locked, fresh, "fc");
+      const merged = mergeSection<Flashcard>(locked, reconcileFresh(fresh, pristine), "fc");
       kit.flashcards = merged.items;
       editState[section] = merged.status;
     }

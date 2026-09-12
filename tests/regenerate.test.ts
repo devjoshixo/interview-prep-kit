@@ -3,10 +3,52 @@ import {
   partition,
   mergeSection,
   replacementCount,
+  reconcileFresh,
   type StatusMap,
 } from "../src/core/regenerate";
 
 type Item = { id: string; text: string };
+
+describe("reconcileFresh (no silent shrink / no inflation on regenerate)", () => {
+  const pristine: Item[] = [
+    { id: "q-1", text: "old A" },
+    { id: "q-2", text: "old B" },
+    { id: "q-3", text: "old C" },
+  ];
+
+  it("returns fresh as-is when the count matches", () => {
+    const fresh: Item[] = [
+      { id: "n-1", text: "new A" },
+      { id: "n-2", text: "new B" },
+      { id: "n-3", text: "new C" },
+    ];
+    expect(reconcileFresh(fresh, pristine)).toEqual(fresh);
+  });
+
+  it("caps inflation: a chatty model can't grow the section", () => {
+    const fresh: Item[] = [
+      { id: "n-1", text: "new A" },
+      { id: "n-2", text: "new B" },
+      { id: "n-3", text: "new C" },
+      { id: "n-4", text: "extra" },
+    ];
+    const out = reconcileFresh(fresh, pristine);
+    expect(out).toHaveLength(3);
+    expect(out.map((x) => x.text)).toEqual(["new A", "new B", "new C"]);
+  });
+
+  it("backfills a shortfall with the original pristine items", () => {
+    const fresh: Item[] = [{ id: "n-1", text: "new A" }];
+    const out = reconcileFresh(fresh, pristine);
+    expect(out).toHaveLength(3); // never shrinks
+    expect(out.map((x) => x.text)).toEqual(["new A", "old B", "old C"]);
+  });
+
+  it("empty fresh (LLM call failed) keeps ALL originals — a no-op, not data loss", () => {
+    const out = reconcileFresh([], pristine);
+    expect(out).toEqual(pristine);
+  });
+});
 
 const items: Item[] = [
   { id: "q-1", text: "edited one" },

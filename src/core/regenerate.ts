@@ -64,3 +64,19 @@ export function replacementCount<T extends { id: string }>(
 ): number {
   return partition(items, status).pristine.length;
 }
+
+// Reconcile freshly generated items against the pristine slots they replace.
+// Two failure modes to guard against, both otherwise silent:
+//   - the model returns MORE than requested -> cap to the pristine count so the
+//     section can't grow every time regenerate is clicked;
+//   - the model returns FEWER (e.g. the call threw and grounded to []) -> keep
+//     the leftover ORIGINAL pristine items instead of dropping them, so the
+//     section never silently shrinks (empty fresh => an honest no-op).
+export function reconcileFresh<T extends { id: string }>(
+  fresh: T[],
+  pristine: T[]
+): T[] {
+  const capped = fresh.slice(0, pristine.length);
+  if (capped.length >= pristine.length) return capped;
+  return [...capped, ...pristine.slice(capped.length)];
+}
