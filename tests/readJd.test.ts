@@ -104,3 +104,24 @@ describe("readJd end-to-end with an injected fake LLM (no network)", () => {
     await expect(readJd(JD, badLlm)).rejects.toThrow(/valid JSON/);
   });
 });
+
+describe("priority is derived from the JD evidence, not just the paraphrase (M2)", () => {
+  it("marks a requirement 'nice' when only the verbatim evidence carries the signal", () => {
+    const jd = "Backend role. GraphQL preferred but not required.";
+    // The model paraphrased the "preferred" wording out of `text`, but the
+    // verbatim `evidence` still carries it — so priority must read both.
+    const kept = groundRequirements(jd, [
+      { text: "GraphQL", kind: "technical", evidence: "GraphQL preferred but not required" },
+    ]);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].priority).toBe("nice");
+  });
+
+  it("still defaults a plain requirement to 'must'", () => {
+    const jd = "You must have strong Go experience.";
+    const kept = groundRequirements(jd, [
+      { text: "Go", kind: "technical", evidence: "strong Go experience" },
+    ]);
+    expect(kept[0].priority).toBe("must");
+  });
+});

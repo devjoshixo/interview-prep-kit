@@ -113,7 +113,9 @@ export function groundRequirements(
       id: `req-${kept.length + 1}`,
       text,
       kind,
-      priority: derivePriority(text),
+      // Derive from the paraphrase AND the verbatim JD quote: "preferred / nice
+      // to have" wording often survives only in `evidence`, not the model's `text`.
+      priority: derivePriority(`${text} ${evidence}`),
     });
   }
   return kept;
