@@ -3,6 +3,7 @@ import { connectDB } from "../../../lib/db";
 import { KitModel } from "../../../models/kit";
 import { currentUserId } from "../../../lib/auth";
 import { runGeneration } from "../../../lib/generate";
+import { rateLimit } from "../../../lib/rateLimit";
 
 export const runtime = "nodejs";
 // With Fluid Compute enabled, Hobby allows up to 300s. A generation is ~18-30s;
@@ -18,6 +19,15 @@ export async function POST(req: Request) {
   try {
     const userId = await currentUserId();
     if (!userId) return NextResponse.json({ error: "sign in required" }, { status: 401 });
+
+    // Generation is expensive (LLM calls); cap runs per user.
+    const rl = rateLimit(`gen:${userId}`, 8, 10 * 60_000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "You're generating a lot of kits — please wait a few minutes." },
+        { status: 429, headers: { "retry-after": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+      );
+    }
 
     const body = (await req.json()) as { jd?: unknown; company_url?: unknown; days?: unknown };
     const jd = typeof body.jd === "string" ? body.jd : "";

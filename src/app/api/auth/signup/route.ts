@@ -2,11 +2,21 @@ import { NextResponse } from "next/server";
 import { connectDB } from "../../../../lib/db";
 import { UserModel } from "../../../../models/user";
 import { hashPassword, setSession } from "../../../../lib/auth";
+import { rateLimit, clientIp } from "../../../../lib/rateLimit";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
+    // Throttle account-creation spam per client IP.
+    const rl = rateLimit(`signup:${clientIp(req)}`, 5, 15 * 60_000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "Too many attempts. Please wait a bit and try again." },
+        { status: 429, headers: { "retry-after": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+      );
+    }
+
     const { email, password } = (await req.json()) as { email?: unknown; password?: unknown };
     if (typeof email !== "string" || typeof password !== "string") {
       return NextResponse.json({ error: "email and password are required" }, { status: 400 });

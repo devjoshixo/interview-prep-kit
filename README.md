@@ -251,6 +251,11 @@ of, alongside the engineering depth in *Design decisions*.
 - Free-tier LLM quotas are real — retry/backoff mitigates transient overload but
   can't create quota; a busy day may need a paid key.
 - Auth is email/password only (no reset/verification), appropriate for this scope.
+- Rate limiting is in-memory (fixed window) on auth + generation. It's enforced
+  per instance, so a multi-instance deployment would back it with a shared store
+  (e.g. Upstash Redis) for a globally exact limit; the SSRF guard blocks fetches
+  to private/loopback/link-local ranges but has a small DNS-rebinding TOCTOU
+  window that pinning the resolved IP would close.
 - `must/nice` priority depends on the wording surviving into the extracted
   requirement text; a reworded requirement can default to `must`.
 
