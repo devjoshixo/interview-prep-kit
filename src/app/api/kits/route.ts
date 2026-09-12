@@ -1,11 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { makeKit } from "../../../core/pipeline";
 import { connectDB } from "../../../lib/db";
 import { KitModel } from "../../../models/kit";
 import { currentUserId } from "../../../lib/auth";
 
 export const runtime = "nodejs";
-export const maxDuration = 90;
+// Vercel Hobby caps serverless functions at 60s; a Groq generation is ~18s.
+export const maxDuration = 60;
 
 type Input = { jd: string; company_url: string; days: number };
 
@@ -66,7 +67,10 @@ export async function POST(req: Request) {
     });
     const id = String(doc._id);
 
-    void runGeneration(id, { jd, company_url, days });
+    // Run the pipeline after the response is sent. `after` keeps the function
+    // alive to finish (works on serverless within maxDuration AND on long-running
+    // hosts), so the response returns instantly while generation continues.
+    after(() => runGeneration(id, { jd, company_url, days }));
 
     return NextResponse.json({ id });
   } catch (err) {
