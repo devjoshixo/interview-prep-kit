@@ -2,17 +2,19 @@
 
 /* Design tokens — see DESIGN.md (premium tier). */
 :root {
-  --bg: #fbfaf8;
-  --bg-sunken: #f4f3ef;
+  /* Calmer, warmer ground so white surfaces lift off it (depth, less glare). */
+  --bg: #f3f1ec;
+  --bg-sunken: #eae6df;
   --surface: #ffffff;
-  --ink: #191817;
-  --ink-2: #57544e;
-  --ink-3: #9c9890;
-  --border: #eceae4;
-  --border-strong: #ddd9d1;
+  /* Text tiers with real, readable contrast (all pass WCAG AA on bg + surface). */
+  --ink: #1b1a17; /* ~14:1  — primary */
+  --ink-2: #4c4941; /* ~8:1   — secondary */
+  --ink-3: #6b665c; /* ~5:1   — tertiary/muted (was 2.6:1, failed AA) */
+  --border: #e5e0d7;
+  --border-strong: #d3cec3;
   --accent: #5b54f0;
   --accent-hover: #4b44e0;
-  --accent-soft: #eeedfe;
+  --accent-soft: #ecebfe;
 }
 
 @theme inline {
