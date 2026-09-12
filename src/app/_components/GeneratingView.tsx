@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import HomeLink from "./HomeLink";
 
 const STEPS = [
   "Reading the JD",
@@ -137,6 +138,9 @@ export default function GeneratingView({
 
   return (
     <div className="py-16">
+      <div className="mb-8">
+        <HomeLink />
+      </div>
       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">Generating</p>
       <h1 className="mt-2 font-display text-[2rem] font-semibold tracking-tight text-ink">
         Building your prep kit

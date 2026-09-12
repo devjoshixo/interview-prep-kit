@@ -64,9 +64,16 @@ export default function AuthForm() {
         <button
           type="submit"
           disabled={busy}
-          className="btn-gradient w-full rounded-full px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+          className="btn-gradient flex w-full items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-white disabled:opacity-70"
         >
-          {busy ? "…" : mode === "login" ? "Sign in" : "Create account"}
+          {busy && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />}
+          {busy
+            ? mode === "login"
+              ? "Signing in…"
+              : "Creating account…"
+            : mode === "login"
+              ? "Sign in"
+              : "Create account"}
         </button>
       </form>
 

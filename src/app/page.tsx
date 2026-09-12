@@ -6,6 +6,7 @@ import { UserModel } from "../models/user";
 import Builder from "./_components/Builder";
 import KitList, { type KitSummary } from "./_components/KitList";
 import LogoutButton from "./_components/LogoutButton";
+import HomeLink from "./_components/HomeLink";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,9 +41,12 @@ export default async function Home() {
       <div className="hero-glow" />
       <div className="relative mx-auto w-full max-w-[760px] px-5 pb-24 pt-10">
         <header className="flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">
-            Interview Prep Kit
-          </span>
+          <div className="flex items-center gap-3">
+            <HomeLink />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">
+              Interview Prep Kit
+            </span>
+          </div>
           <div className="flex items-center gap-3 text-[13px] text-ink-3">
             {user?.email && <span className="hidden sm:inline">{user.email}</span>}
             <LogoutButton />

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import HomeLink from "./HomeLink";
 import type { ReactNode } from "react";
 import type { GenerationReport } from "../../models/kit";
 import type { Kit, Question, Flashcard } from "../../core/types";
@@ -180,7 +181,10 @@ export default function KitView({
 
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">Prep kit</p>
+      <div className="flex items-center gap-3">
+        <HomeLink />
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">Prep kit</p>
+      </div>
       <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-[2.5rem] font-semibold leading-[1.05] tracking-tight text-ink sm:text-[3rem]">
@@ -664,28 +668,90 @@ function EditableFlashcard({
 /* ---------- Plan ---------- */
 
 function PlanTab({ kit }: { kit: Kit }) {
+  const [open, setOpen] = useState<number | null>(null);
   if (kit.schedule.days.length === 0) return <Empty>No plan — add questions first.</Empty>;
+  const byId = new Map(kit.questions.map((q) => [q.id, q]));
   return (
-    <ol className="overflow-hidden rounded-xl border border-border">
-      {kit.schedule.days.map((d) => {
-        const meta = CATEGORY_META[d.focus as Question["category"]];
-        return (
-          <li
-            key={d.day}
-            className="flex items-center gap-4 bg-surface px-4 py-4 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border"
-          >
-            <span className="w-14 shrink-0 text-[13px] font-medium text-ink-3">Day {d.day}</span>
-            <span className="flex flex-1 items-center gap-2 text-[15px] text-ink">
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta?.dot ?? "var(--ink-3)" }} />
-              {meta?.label ?? d.focus}
-            </span>
-            <span className="shrink-0 text-[13px] text-ink-3">
-              {d.question_ids.length} · {d.minutes}m
-            </span>
-          </li>
-        );
-      })}
-    </ol>
+    <div>
+      <p className="mb-3 text-[13px] text-ink-3">Tap a day to see its questions.</p>
+      <ol className="overflow-hidden rounded-xl border border-border">
+        {kit.schedule.days.map((d) => {
+          const meta = CATEGORY_META[d.focus as Question["category"]];
+          const isOpen = open === d.day;
+          const dayQuestions = d.question_ids
+            .map((id) => byId.get(id))
+            .filter((q): q is Question => Boolean(q));
+          return (
+            <li
+              key={d.day}
+              className="bg-surface [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border"
+            >
+              <button
+                type="button"
+                onClick={() => setOpen(isOpen ? null : d.day)}
+                aria-expanded={isOpen}
+                className="flex w-full items-center gap-4 px-4 py-4 text-left transition hover:bg-bg-sunken"
+              >
+                <span className="w-14 shrink-0 text-[13px] font-medium text-ink-3">Day {d.day}</span>
+                <span className="flex flex-1 items-center gap-2 text-[15px] text-ink">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta?.dot ?? "var(--ink-3)" }} />
+                  {meta?.label ?? d.focus}
+                </span>
+                <span className="shrink-0 text-[13px] text-ink-3">
+                  {d.question_ids.length} · {d.minutes}m
+                </span>
+                <svg
+                  className={`shrink-0 text-ink-3 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+              {isOpen && (
+                <div className="border-t border-border bg-bg-sunken px-4 py-3">
+                  {dayQuestions.length === 0 ? (
+                    <p className="py-1 text-[13px] text-ink-3">No questions scheduled for this day.</p>
+                  ) : (
+                    <ol className="space-y-3">
+                      {dayQuestions.map((q, i) => {
+                        const qm = CATEGORY_META[q.category];
+                        const diff = DIFF_META[q.difficulty as 1 | 2 | 3];
+                        return (
+                          <li key={q.id} className="flex gap-3">
+                            <span className="w-5 shrink-0 text-right text-[12px] text-ink-3">{i + 1}.</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-[14px] text-ink">{q.prompt}</span>
+                              <span className="mt-1 flex items-center gap-3 text-[12px] text-ink-3">
+                                <span className="inline-flex items-center gap-1.5">
+                                  <span
+                                    className="h-1.5 w-1.5 rounded-full"
+                                    style={{ background: qm?.dot ?? "var(--ink-3)" }}
+                                  />
+                                  {qm?.label ?? q.category}
+                                </span>
+                                {diff && <span style={{ color: diff.color }}>{diff.label}</span>}
+                              </span>
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
 
