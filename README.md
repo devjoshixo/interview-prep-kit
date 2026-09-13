@@ -135,11 +135,23 @@ Two sources, both grounded:
    the top few **same-domain** pages, and summarise **only from text actually
    fetched**. Sources are the exact URLs read — the app can't cite a page it
    didn't open.
-2. **The web** — Tavily search (top 2-3 results) enriches the summary and adds
-   external citations. The company's own site remains the source of "what they do".
+2. **The web — two distinct searches, not one.** A company-overview query enriches
+   the summary; a **separate, targeted query for how the company interviews**
+   ("interview process / hiring rounds / interview questions") feeds
+   `company_brief.hiring_notes`. That second search is what makes the kit
+   *responsive to the company*: the hiring notes are passed into question
+   generation, so a company that publishes a take-home plus a system-design round
+   produces a different kit from one that says nothing. Empty string when nothing
+   is found — the model is told never to guess a process.
 
-Everywhere, missing data is **honest-none**: no results, an unreachable site, or
-unparsable model output yields an empty section — never fabricated content.
+The company's own site remains the source of "what they do". Everywhere, missing
+data is **honest-none**: no results, an unreachable site, or unparsable model
+output yields an empty section — never fabricated content.
+
+Fetched pages are treated as **untrusted data, never instructions** — the brief
+prompt fences the page text and tells the model to ignore anything inside it that
+looks like a directive, and every structured field (requirement ids, categories)
+is verified in code regardless of what the page said.
 
 ---
 
@@ -151,7 +163,9 @@ Eight steps, each verified in code before the next trusts it:
    quoted `evidence` actually appears in the JD (hallucinations dropped), and
    derives must/nice from the wording.
 2. **Visit the site** — fetch + rank + summarise (above).
-3. **Search the web** — Tavily enrichment.
+3. **Search the web** — two Tavily queries: a company overview (enriches the
+   summary) and a targeted **interview-process** search whose result becomes
+   `hiring_notes` and is fed into step 4, so how they hire shapes what's asked.
 4. **Make questions** — **one batched LLM call per category** (not one per
    requirement — my call, to avoid a token/rate-limit blow-up). Code strips any
    `requirement_id` the model invents.
@@ -184,21 +198,45 @@ items as a *keep* list and the tombstones as an *avoid* list, then merges the fr
 items **around** the locked ones. Locked content never round-trips the model (so it
 can't be paraphrased), which is both the correctness guarantee and a cost saving.
 
+**Reordering and moving** are first-class alongside edit/add/delete: a question can
+be moved up/down **within its category** (buttons rather than drag, so it works from
+the keyboard) and **moved to another category** via a select, which validates
+against the category enum server-side. A hand-moved question is marked `edited`, so
+the user's placement survives the next regeneration — the same guarantee as an edit.
+
+A short regenerate also can't silently shrink a section: fresh items are capped to
+the number of pristine slots, and any shortfall (e.g. the model call failed) is
+backfilled with the original items, so a failed regenerate is a no-op rather than
+data loss.
+
 Writes are **optimistically concurrent**: the kit carries a `version`, and every
-edit / delete / add / regenerate is a **compare-and-swap** (`updateOne` filtered on
-the version). A write from a stale view is rejected with `409`; the client reloads
-the latest and tells the user, instead of silently losing an update.
+edit / delete / add / reorder / move / regenerate is a **compare-and-swap**
+(`updateOne` filtered on the version). A write from a stale view is rejected with
+`409`; the client reloads the latest and tells the user, instead of silently losing
+an update.
 
 ---
 
 ## Schedule allocation
 
-Pure code (`src/core/schedule.ts`), no LLM. Questions are weighted (harder and
-broader-coverage first) then **greedy-packed** into the available days using a
-per-day minute budget. The key property (my catch): it's **bounded** — once it's
-on the last day, everything remaining lands there, so the plan never spills past N
-days and never drops a question. A naive "stop when the day is full" both wastes
-days and can overflow.
+Pure code (`src/core/schedule.ts`), no LLM. Questions are weighted — **must-have
+requirements first**, then harder, then broader-coverage — so a must-have can never
+sort behind an easier nice-to-have. They're then **greedy-packed** into the days
+using a per-day minute budget.
+
+Two properties I went out of my way to guarantee:
+
+- **Bounded:** once it's on the last day, everything remaining lands there, so the
+  plan never spills past N days and never drops a question. A naive "stop when the
+  day is full" both wastes days and can overflow.
+- **Exactly N days:** the plan spans precisely the number of days requested. When
+  there are *more days than questions* (a 60-day run with a thin kit), questions are
+  spread one per day and the remainder are emitted as `review` days — rather than
+  cramming everything into day 1 and returning a 1-day plan. An empty kit is the one
+  exception: no questions means an empty schedule, because inventing 60 review days
+  for a kit with nothing in it would be dishonest.
+
+Durations are integer minutes throughout (10/15/20 by difficulty).
 
 ---
 
@@ -207,10 +245,19 @@ days and can overflow.
 The kit isn't a document — it's a **study tool**. The `/kit/[id]` view is a tabbed
 app (Overview / Questions / Flashcards / Plan) built for active recall:
 
-- **Flashcards flip** (tap to reveal the answer)
+- **Practice mode — weakest first.** Step through cards **one at a time**, reveal
+  the answer, then record how confident you felt (*Shaky / OK / Solid*). The queue
+  is ordered **least-confident-first** (unrated cards lead — you haven't proved them
+  yet), so each session opens on your weak spots. The order is fixed at session
+  start so rating mid-session doesn't reshuffle under you; the *next* session
+  re-sorts on the updated scores. I chose confidence-weighted ordering over a full
+  spaced-repetition interval deliberately: SRS intervals only pay off across days of
+  repeat use, and this tool is used against a deadline measured in days, where
+  "show me what I'm worst at, now" is the behaviour that actually helps.
+- **Flashcards flip** (click or Enter/Space — keyboard-operable)
 - **Questions hide their answers** behind "Show answer" — you think first, then check
-- **Progress tracking** — mark questions/cards known; a per-tab progress bar,
-  persisted in `localStorage`
+- **Progress tracking** — per-tab progress bar plus a rated/shaky count, persisted
+  in `localStorage`
 - keyboard-navigable tabs, a floating nav pill, and a live generation stepper
 
 Turning "here is your kit" into "work through your kit" is the feature I'm proudest
@@ -253,11 +300,25 @@ of, alongside the engineering depth in *Design decisions*.
 - Auth is email/password only (no reset/verification), appropriate for this scope.
 - Rate limiting is in-memory (fixed window) on auth + generation. It's enforced
   per instance, so a multi-instance deployment would back it with a shared store
-  (e.g. Upstash Redis) for a globally exact limit; the SSRF guard blocks fetches
-  to private/loopback/link-local ranges but has a small DNS-rebinding TOCTOU
-  window that pinning the resolved IP would close.
-- `must/nice` priority depends on the wording surviving into the extracted
-  requirement text; a reworded requirement can default to `must`.
+  (e.g. Upstash Redis) for a globally exact limit.
+- **The SSRF guard is deliberately scoped to production.** It resolves the host and
+  refuses private / loopback / link-local ranges (including the cloud-metadata
+  address), re-checking on every redirect hop since a public URL can otherwise
+  bounce to an internal one. It is gated on `NODE_ENV === "production"` on purpose:
+  the batch entry point is evaluated against company sites that may be served from
+  a **local address**, and blocking those outside production would break legitimate
+  evaluation runs. A small DNS-rebinding TOCTOU window remains, which pinning the
+  resolved IP would close. Responses are also restricted by content type
+  (`text/html`) and size (2 MB cap).
+- `must/nice` priority is derived in code from the wording, reading both the
+  extracted requirement text **and** the verbatim JD evidence quote (the "preferred
+  / nice to have" signal often survives only in the quote). A requirement whose
+  optionality isn't stated anywhere still defaults to `must`.
+- No in-app upload of a description/company **file**: multiple roles are prepared by
+  submitting again (each kit is saved and listed), and the batch entry point covers
+  bulk runs. A file-upload form is the obvious next increment.
+- Robots.txt is not fetched; crawling is bounded instead (same-domain only, max 4
+  pages, per-request timeouts) and identifies itself with a descriptive user agent.
 
 **What I'd do next:** research caching, per-step observability surfaced in the UI
 (timings already captured), and multi-instance correctness testing behind a load

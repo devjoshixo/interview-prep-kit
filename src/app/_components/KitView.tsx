@@ -825,7 +825,21 @@ function EditableFlashcard({
 
   return (
     <div>
-      <div className="flip h-40 select-none" onClick={() => setFlipped((v) => !v)}>
+      {/* Focusable + Enter/Space so the card is operable without a mouse. */}
+      <div
+        className="flip h-40 select-none rounded-xl outline-none focus-visible:ring-4 focus-visible:ring-accent-soft"
+        role="button"
+        tabIndex={0}
+        aria-pressed={flipped}
+        aria-label={flipped ? "Flip card back to the question" : "Flip card to reveal the answer"}
+        onClick={() => setFlipped((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setFlipped((v) => !v);
+          }
+        }}
+      >
         <div className={`flip-inner ${flipped ? "flipped" : ""}`}>
           <div className="flip-face flex cursor-pointer flex-col justify-between rounded-xl border border-border bg-surface p-4 shadow-card">
             <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-3">Question</span>

@@ -9,6 +9,9 @@ export type FetchPage = (url: string) => Promise<string | null>;
 // A site that connects but never responds must not stall the generation job.
 const PAGE_TIMEOUT_MS = 8_000;
 const MAX_REDIRECTS = 4;
+// Cap what we will accept from an untrusted host: a multi-megabyte page must not
+// be pulled into memory just to extract a few thousand characters of text.
+const MAX_BYTES = 2_000_000;
 
 // Real implementation. Returns HTML text, or null on any failure / non-HTML —
 // callers treat null as "this page gave us nothing" (honest-none), never a crash.
@@ -55,7 +58,12 @@ export const fetchPage: FetchPage = async (url) => {
       if (!res.ok) return null;
       const contentType = res.headers.get("content-type") ?? "";
       if (!contentType.includes("text/html")) return null;
-      return await res.text();
+      // Reject an oversized body up front when the host declares one, and cap
+      // what we keep when it doesn't.
+      const declared = Number(res.headers.get("content-length") ?? "");
+      if (Number.isFinite(declared) && declared > MAX_BYTES) return null;
+      const text = await res.text();
+      return text.length > MAX_BYTES ? text.slice(0, MAX_BYTES) : text;
     }
     return null; // too many redirects
   } catch {
