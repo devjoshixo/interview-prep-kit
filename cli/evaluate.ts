@@ -13,6 +13,7 @@
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { makeKit } from "../src/core/pipeline";
+import { validateKit } from "../src/core/validate";
 import { loadEnvFile } from "../src/lib/env";
 import type { BatchCase, BatchOutput, BatchResult } from "../src/core/types";
 
@@ -61,6 +62,17 @@ async function runCase(testCase: BatchCase): Promise<BatchResult> {
       company_url: testCase.company_url,
       days: testCase.days,
     });
+    // Validate the structure before emitting it — a kit that fails this is broken
+    // regardless of how good its content reads.
+    const check = validateKit(kit);
+    if (!check.ok) {
+      return {
+        id: testCase.id,
+        status: "failed",
+        kit: null,
+        error: { code: "KIT_VALIDATION_FAILED", message: check.errors.slice(0, 5).join("; ") },
+      };
+    }
     return { id: testCase.id, status: "ok", kit, error: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

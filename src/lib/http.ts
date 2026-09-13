@@ -29,7 +29,12 @@ export const fetchPage: FetchPage = async (url) => {
         return null;
       }
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-      if (await isHostBlocked(parsed.hostname)) return null;
+      // Reject private/loopback targets IN PRODUCTION only. The batch entry point
+      // is run against company sites that may be served from a local address, so
+      // blocking those outside production would break legitimate evaluation runs.
+      if (process.env.NODE_ENV === "production" && (await isHostBlocked(parsed.hostname))) {
+        return null;
+      }
 
       const res = await fetchWithTimeout(
         current,

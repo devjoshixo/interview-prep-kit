@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { fetchWithTimeout } from "../src/lib/timeout";
 import { fetchPage } from "../src/lib/http";
@@ -50,16 +50,28 @@ describe("fetchWithTimeout (the mechanism)", () => {
   });
 });
 
-describe("fetchPage SSRF guard (refuses private / loopback hosts)", () => {
-  it("returns null immediately for a loopback host, without fetching it", async () => {
+describe("fetchPage SSRF guard (production-gated, per the brief)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("IN PRODUCTION: refuses a loopback host immediately, without fetching it", async () => {
+    vi.stubEnv("NODE_ENV", "production");
     const url = await hangingServer(); // bound to 127.0.0.1 — a blocked range
     const start = Date.now();
     const html = await fetchPage(url);
     const elapsed = Date.now() - start;
     expect(html).toBeNull(); // refused → honest-none, no crash
-    // Blocked by the SSRF guard before the 8s fetch even starts — a loopback URL
-    // (or cloud-metadata / private LAN) can never be reached from the server.
-    expect(elapsed).toBeLessThan(2000);
+    expect(elapsed).toBeLessThan(2000); // blocked before the 8s fetch even starts
+  });
+
+  it("OUTSIDE production: allows a local address (the batch runs against local sites)", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    const url = await listen((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end("<body>local company site</body>");
+    });
+    // Section 9: batch company sites may be served from a local address, so the
+    // private-range block must NOT apply outside production.
+    await expect(fetchPage(url)).resolves.toContain("local company site");
   });
 });
 

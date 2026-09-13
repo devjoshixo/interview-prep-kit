@@ -3,6 +3,7 @@
 // entry points run the exact same pipeline and persistence logic.
 
 import { makeKit } from "../core/pipeline";
+import { validateKit } from "../core/validate";
 import { KitModel } from "../models/kit";
 
 export type GenerationInput = { jd: string; company_url: string; days: number };
@@ -27,6 +28,14 @@ export async function runGeneration(id: string, input: GenerationInput): Promise
     });
     const finalPrev = starts[starts.length - 1];
     if (finalPrev) steps.push({ step: finalPrev.step, label: finalPrev.label, ms: Date.now() - finalPrev.t });
+
+    // Validate the generated kit against the expected structure BEFORE saving it.
+    // A structurally-broken kit must not be persisted as "ready".
+    const check = validateKit(kit);
+    if (!check.ok) {
+      throw new Error(`generated kit failed validation: ${check.errors.slice(0, 5).join("; ")}`);
+    }
+
     const report = {
       durationMs: Date.now() - t0,
       steps,
