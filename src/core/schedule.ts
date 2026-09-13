@@ -14,10 +14,17 @@ function estMinutes(q: Question): number {
   return MINUTES[q.difficulty];
 }
 
-// Harder first; ties broken by how many requirements the question covers.
-function byWeight(a: Question, b: Question): number {
-  if (b.difficulty !== a.difficulty) return b.difficulty - a.difficulty;
-  return b.requirement_ids.length - a.requirement_ids.length;
+// Must-have material first, then harder first, then broader coverage. Priority
+// leads because the brief asks for "harder AND higher-priority material earlier":
+// a must-have requirement must not end up behind a nice-to-have.
+function byWeight(mustIds: Set<string>) {
+  return (a: Question, b: Question): number => {
+    const aMust = a.requirement_ids.some((id) => mustIds.has(id)) ? 1 : 0;
+    const bMust = b.requirement_ids.some((id) => mustIds.has(id)) ? 1 : 0;
+    if (bMust !== aMust) return bMust - aMust;
+    if (b.difficulty !== a.difficulty) return b.difficulty - a.difficulty;
+    return b.requirement_ids.length - a.requirement_ids.length;
+  };
 }
 
 function dayFocus(ids: string[], byId: Map<string, Question>): string {
@@ -37,16 +44,43 @@ function dayFocus(ids: string[], byId: Map<string, Question>): string {
   return focus;
 }
 
+// Pad out to exactly the requested number of days. The brief requires the plan to
+// span EXACTLY the days asked for, so a sparse kit (few questions, many days)
+// gets review days rather than a short plan.
+function padToDays(days: ScheduleDay[], daysAvailable: number): ScheduleDay[] {
+  const out = [...days];
+  while (out.length < daysAvailable) {
+    out.push({ day: out.length + 1, focus: "review", question_ids: [], minutes: 0 });
+  }
+  return out;
+}
+
 export function allocateSchedule(
   questions: Question[],
-  daysAvailable: number
+  daysAvailable: number,
+  mustRequirementIds: Set<string> = new Set()
 ): { days_available: number; days: ScheduleDay[] } {
+  // No questions => nothing to distribute; an empty schedule is the honest answer
+  // (a thin kit should say so rather than invent N days of review).
   if (daysAvailable <= 0 || questions.length === 0) {
     return { days_available: daysAvailable, days: [] };
   }
 
   const byId = new Map(questions.map((q) => [q.id, q]));
-  const sorted = [...questions].sort(byWeight);
+  const sorted = [...questions].sort(byWeight(mustRequirementIds));
+
+  // More days than questions: spread one per day (hardest/must-have first) and
+  // pad the rest, instead of cramming everything into day 1.
+  if (sorted.length <= daysAvailable) {
+    const spread = sorted.map((q, i) => ({
+      day: i + 1,
+      focus: dayFocus([q.id], byId),
+      question_ids: [q.id],
+      minutes: estMinutes(q),
+    }));
+    return { days_available: daysAvailable, days: padToDays(spread, daysAvailable) };
+  }
+
   const total = sorted.reduce((sum, q) => sum + estMinutes(q), 0);
   const perDay = Math.ceil(total / daysAvailable); // budget that fits in N days
 
@@ -76,5 +110,5 @@ export function allocateSchedule(
   }
   if (ids.length > 0) flush();
 
-  return { days_available: daysAvailable, days };
+  return { days_available: daysAvailable, days: padToDays(days, daysAvailable) };
 }

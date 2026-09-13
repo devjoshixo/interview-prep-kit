@@ -88,7 +88,10 @@ export async function makeKit(
 
   // Step 7 — schedule the questions across the days available.
   await report(7, "Building the study plan");
-  const schedule = allocateSchedule(questions, input.days);
+  const mustIds = new Set(
+    role.requirements.filter((r) => r.priority === "must").map((r) => r.id)
+  );
+  const schedule = allocateSchedule(questions, input.days, mustIds);
 
   return {
     source: {

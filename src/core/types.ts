@@ -45,6 +45,9 @@ export type Kit = {
     summary: string;
     what_they_do: string;
     sources: string[];
+    // Extension (Appendix A permits extending): what public sources say about how
+    // this company interviews. Empty string when nothing was found — honest-none.
+    hiring_notes?: string;
   };
   role: {
     title: string;

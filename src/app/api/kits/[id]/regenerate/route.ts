@@ -62,7 +62,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       const merged = mergeSection<Question>(locked, reconcileFresh(fresh, pristine), "q");
       kit.questions = merged.items;
       kit.coverage.uncovered_requirement_ids = findUncovered(requirements, kit.questions);
-      kit.schedule = allocateSchedule(kit.questions, kit.schedule.days_available);
+      const mustIds = new Set(
+        requirements.filter((r) => r.priority === "must").map((r) => r.id)
+      );
+      kit.schedule = allocateSchedule(kit.questions, kit.schedule.days_available, mustIds);
       editState[section] = merged.status;
     } else {
       const { locked, pristine } = partition(kit.flashcards, status);

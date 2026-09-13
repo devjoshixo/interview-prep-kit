@@ -13,6 +13,7 @@ export type CompanyBrief = {
   summary: string;
   what_they_do: string;
   sources: string[];
+  hiring_notes?: string;
 };
 
 export type VisitResult = {

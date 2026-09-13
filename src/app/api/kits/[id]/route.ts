@@ -13,9 +13,13 @@ const SECTIONS: Section[] = ["questions", "flashcards"];
 type EditMap = Record<string, "edited" | "user-created">;
 type Item = { id: string; [k: string]: unknown };
 
+function mustIdsOf(kit: Kit): Set<string> {
+  return new Set(kit.role.requirements.filter((r) => r.priority === "must").map((r) => r.id));
+}
+
 function recomputeQuestionDependents(kit: Kit): void {
   kit.coverage.uncovered_requirement_ids = findUncovered(kit.role.requirements, kit.questions);
-  kit.schedule = allocateSchedule(kit.questions, kit.schedule.days_available);
+  kit.schedule = allocateSchedule(kit.questions, kit.schedule.days_available, mustIdsOf(kit));
 }
 
 const conflict = () =>

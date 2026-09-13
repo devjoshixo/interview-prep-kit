@@ -18,6 +18,47 @@ function q(
   };
 }
 
+describe("allocateSchedule — spans exactly the days requested", () => {
+  it("emits exactly N days when questions are sparse (the 60-day case)", () => {
+    const res = allocateSchedule([q("q-1", 3), q("q-2", 2), q("q-3", 1)], 60);
+    expect(res.days).toHaveLength(60); // not 1, not 3 — exactly what was asked for
+    expect(res.days.map((d) => d.day)).toEqual(
+      Array.from({ length: 60 }, (_, i) => i + 1)
+    );
+    // the three questions are spread one per day, hardest first, rest are review
+    expect(res.days.slice(0, 3).map((d) => d.question_ids)).toEqual([["q-1"], ["q-2"], ["q-3"]]);
+    expect(res.days[3]).toEqual({ day: 4, focus: "review", question_ids: [], minutes: 0 });
+    const scheduled = res.days.flatMap((d) => d.question_ids);
+    expect(scheduled.sort()).toEqual(["q-1", "q-2", "q-3"]); // nothing dropped
+  });
+
+  it("still fits a dense kit inside N days without dropping anything", () => {
+    const many = Array.from({ length: 12 }, (_, i) => q(`q-${i + 1}`, 2));
+    const res = allocateSchedule(many, 3);
+    expect(res.days).toHaveLength(3);
+    expect(res.days.flatMap((d) => d.question_ids)).toHaveLength(12);
+  });
+});
+
+describe("allocateSchedule — must-have material lands earlier", () => {
+  it("puts a must-have question before an easier nice-to-have one", () => {
+    const mustIds = new Set(["req-must"]);
+    // the nice-to-have is HARDER, so without priority it would sort first
+    const questions = [
+      q("q-nice", 3, "technical", ["req-nice"]),
+      q("q-must", 1, "technical", ["req-must"]),
+    ];
+    const res = allocateSchedule(questions, 2, mustIds);
+    expect(res.days[0].question_ids).toEqual(["q-must"]);
+    expect(res.days[1].question_ids).toEqual(["q-nice"]);
+  });
+
+  it("falls back to difficulty ordering when no priorities are given", () => {
+    const res = allocateSchedule([q("q-easy", 1), q("q-hard", 3)], 2);
+    expect(res.days[0].question_ids).toEqual(["q-hard"]);
+  });
+});
+
 describe("allocateSchedule (weighted sort + greedy pack)", () => {
   it("returns an empty schedule for no questions or zero days, keeping days_available", () => {
     expect(allocateSchedule([], 5)).toEqual({ days_available: 5, days: [] });
