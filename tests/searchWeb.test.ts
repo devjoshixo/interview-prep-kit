@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildQuery, mergeSources, searchWeb } from "../src/core/steps/searchWeb";
+import { buildQuery, mergeSources, searchWeb, companyFromUrl } from "../src/core/steps/searchWeb";
 import type { LlmComplete } from "../src/lib/llm";
 import type { WebSearch } from "../src/lib/tavily";
 import type { CompanyBrief } from "../src/core/steps/visitSite";
@@ -78,5 +78,19 @@ describe("searchWeb (enrichment)", () => {
 
     expect(out.summary).toBe(BRIEF.summary); // preserved
     expect(out.sources).toContain("https://news.example.com/acme"); // still cited
+  });
+});
+
+describe("companyFromUrl (research still runs when the JD doesn't name the company)", () => {
+  it("derives the registrable name from the URL", () => {
+    expect(companyFromUrl("https://posthog.com")).toBe("posthog");
+    expect(companyFromUrl("https://www.stripe.com/jobs")).toBe("stripe");
+    expect(companyFromUrl("acme.co.uk")).toBe("acme");
+  });
+
+  it("returns empty for unusable input rather than guessing", () => {
+    expect(companyFromUrl("")).toBe("");
+    expect(companyFromUrl("   ")).toBe("");
+    expect(companyFromUrl("not a url at all !!")).toBe("");
   });
 });

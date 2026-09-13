@@ -7,6 +7,7 @@
 
 import type { LlmComplete } from "../../lib/llm";
 import type { Flashcard, Requirement } from "../types";
+import { parseJsonArray } from "../parseArray";
 
 type RawFlashcard = { requirement_ids?: unknown; front?: unknown; back?: unknown };
 
@@ -73,8 +74,7 @@ export async function makeFlashcards(
   const validIds = new Set(requirements.map((r) => r.id));
   try {
     const raw = await llm(buildPrompt(requirements), { schema: FLASHCARD_SCHEMA });
-    const parsed = JSON.parse(raw);
-    return groundFlashcards(validIds, Array.isArray(parsed) ? parsed : []);
+    return groundFlashcards(validIds, parseJsonArray(raw) as RawFlashcard[]);
   } catch {
     return []; // honest-none: no flashcards rather than a crash
   }

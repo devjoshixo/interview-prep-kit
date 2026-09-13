@@ -11,6 +11,7 @@ import type { Question, Requirement } from "../types";
 import type { CompanyBrief } from "./visitSite";
 import { findUncovered } from "../coverage";
 import { CATEGORIES } from "./makeQuestions";
+import { parseJsonArray } from "../parseArray";
 
 const MAX_PASSES = 3; // total passes incl. the initial generation
 
@@ -106,8 +107,7 @@ async function callGapFill(
 ): Promise<RawGapQuestion[]> {
   try {
     const raw = await llm(buildGapPrompt(uncovered, brief), { schema: GAP_SCHEMA });
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as RawGapQuestion[]) : [];
+    return parseJsonArray(raw) as RawGapQuestion[];
   } catch {
     return [];
   }

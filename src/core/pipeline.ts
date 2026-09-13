@@ -4,7 +4,7 @@ import { fetchPage as defaultFetchPage, type FetchPage } from "../lib/http";
 import { tavilySearch, type WebSearch } from "../lib/tavily";
 import { readJd } from "./steps/readJd";
 import { visitSite } from "./steps/visitSite";
-import { searchWeb } from "./steps/searchWeb";
+import { searchWeb, companyFromUrl } from "./steps/searchWeb";
 import { makeQuestions } from "./steps/makeQuestions";
 import { fillGaps } from "./steps/fillGaps";
 import { makeFlashcards } from "./steps/makeFlashcards";
@@ -59,9 +59,12 @@ export async function makeKit(
   const site = await visitSite(input.company_url, { fetchPage, llm });
 
   // Step 3 — search the web (enrich the brief; own-site data stays intact).
+  // If the JD never named the company, derive it from the URL we were given so the
+  // research still happens instead of silently skipping.
   await report(3, "Searching the web");
+  const companyName = role.company || companyFromUrl(input.company_url);
   const brief = await searchWeb(
-    { company: role.company, brief: site.brief },
+    { company: companyName, brief: site.brief },
     { search, llm }
   );
 

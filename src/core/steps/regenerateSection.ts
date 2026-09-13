@@ -9,6 +9,7 @@ import type { LlmComplete } from "../../lib/llm";
 import type { Flashcard, Question, Requirement } from "../types";
 import { groundGapFill } from "./fillGaps";
 import { groundFlashcards } from "./makeFlashcards";
+import { parseJsonArray } from "../parseArray";
 
 const CATEGORIES = ["technical", "behavioural", "system-design", "company-fit"];
 
@@ -70,8 +71,11 @@ export async function regenerateQuestions(
   ].join("\n");
   try {
     const raw = await llm(prompt, { schema: QUESTION_SCHEMA });
-    const parsed = JSON.parse(raw);
-    const grounded = groundGapFill(validIds, Array.isArray(parsed) ? parsed : [], 0);
+    const grounded = groundGapFill(
+      validIds,
+      parseJsonArray(raw) as Parameters<typeof groundGapFill>[1],
+      0
+    );
     return category ? grounded.map((q) => ({ ...q, category })) : grounded;
   } catch {
     return [];
@@ -112,8 +116,10 @@ export async function regenerateFlashcards(
   ].join("\n");
   try {
     const raw = await llm(prompt, { schema: FLASHCARD_SCHEMA });
-    const parsed = JSON.parse(raw);
-    return groundFlashcards(validIds, Array.isArray(parsed) ? parsed : []);
+    return groundFlashcards(
+      validIds,
+      parseJsonArray(raw) as Parameters<typeof groundFlashcards>[1]
+    );
   } catch {
     return [];
   }

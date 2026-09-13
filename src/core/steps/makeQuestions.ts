@@ -8,6 +8,7 @@
 import type { LlmComplete } from "../../lib/llm";
 import type { Question, Requirement } from "../types";
 import type { CompanyBrief } from "./visitSite";
+import { parseJsonArray } from "../parseArray";
 
 export const CATEGORIES: Question["category"][] = [
   "technical",
@@ -123,8 +124,7 @@ async function callCategory(
     const raw = await llm(buildCategoryPrompt(category, requirements, brief), {
       schema: QUESTION_SCHEMA,
     });
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as RawQuestion[]) : [];
+    return parseJsonArray(raw) as RawQuestion[];
   } catch {
     return []; // one category failing must not sink the others
   }

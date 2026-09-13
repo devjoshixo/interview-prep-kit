@@ -19,6 +19,22 @@ export function buildQuery(company: string): string {
   return c ? `${c} company overview` : "";
 }
 
+// Plenty of postings never name the employer. Rather than skip the web research
+// entirely, fall back to the registrable name in the company URL the user gave us.
+// This is DERIVATION from user-supplied input, not invention: we aren't guessing a
+// company, we're reading the one we were pointed at.
+export function companyFromUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  try {
+    const host = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).hostname;
+    const parts = host.replace(/^www\./i, "").split(".");
+    return parts.length > 1 ? parts[0] : host;
+  } catch {
+    return "";
+  }
+}
+
 // A SECOND, targeted query: public discussion of how this company interviews.
 // Kept separate from the overview query so the two sets of results can be used
 // for different things — one sharpens the summary, one informs the kit's prep.
