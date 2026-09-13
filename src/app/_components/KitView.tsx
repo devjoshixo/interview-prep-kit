@@ -63,14 +63,21 @@ export default function KitView({
   const [tab, setTab] = useState<Tab>("Overview");
   const [knownQ, setKnownQ] = useState<Set<string>>(new Set());
   const [knownC, setKnownC] = useState<Set<string>>(new Set());
+  // Per-card confidence (1 = shaky, 3 = solid). Drives the practice ordering.
+  const [confidence, setConfidence] = useState<Record<string, number>>({});
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(`ipk:progress:${kitId}`);
       if (raw) {
-        const p = JSON.parse(raw) as { questions?: string[]; cards?: string[] };
+        const p = JSON.parse(raw) as {
+          questions?: string[];
+          cards?: string[];
+          confidence?: Record<string, number>;
+        };
         setKnownQ(new Set(p.questions ?? []));
         setKnownC(new Set(p.cards ?? []));
+        setConfidence(p.confidence ?? {});
       }
     } catch {
       /* ignore */
@@ -80,12 +87,12 @@ export default function KitView({
     try {
       localStorage.setItem(
         `ipk:progress:${kitId}`,
-        JSON.stringify({ questions: [...knownQ], cards: [...knownC] })
+        JSON.stringify({ questions: [...knownQ], cards: [...knownC], confidence })
       );
     } catch {
       /* ignore */
     }
-  }, [kitId, knownQ, knownC]);
+  }, [kitId, knownQ, knownC, confidence]);
 
   // On a version conflict (someone changed this kit elsewhere), reload the latest
   // and tell the user — never silently clobber their other session's change.
@@ -242,6 +249,8 @@ export default function KitView({
             status={editState.flashcards ?? {}}
             known={knownC}
             setKnown={setKnownC}
+            confidence={confidence}
+            setConfidence={setConfidence}
             onPatch={patch}
             onRegenerate={() => regenerate("flashcards")}
             regenerating={busy === "regen:flashcards"}
@@ -400,7 +409,7 @@ function QuestionsTab({
                 <span className="text-[11px] text-ink-3">{qs.length}</span>
               </div>
               <ul className="space-y-3">
-                {qs.map((q) => (
+                {qs.map((q, i) => (
                   <EditableQuestion
                     key={q.id}
                     q={q}
@@ -409,6 +418,14 @@ function QuestionsTab({
                     onToggleOpen={() => toggleOpen(q.id)}
                     known={known.has(q.id)}
                     onToggleKnown={() => toggleKnown(q.id)}
+                    isFirst={i === 0}
+                    isLast={i === qs.length - 1}
+                    onReorder={(direction) =>
+                      onPatch({ section: "questions", action: "reorder", itemId: q.id, direction })
+                    }
+                    onMove={(category) =>
+                      onPatch({ section: "questions", action: "move", itemId: q.id, category })
+                    }
                     onSave={(patch) => onPatch({ section: "questions", action: "edit", itemId: q.id, patch })}
                     onDelete={async () => {
                       const ok = await ask({
@@ -452,6 +469,10 @@ function EditableQuestion({
   onToggleOpen,
   known,
   onToggleKnown,
+  isFirst,
+  isLast,
+  onReorder,
+  onMove,
   onSave,
   onDelete,
 }: {
@@ -461,6 +482,10 @@ function EditableQuestion({
   onToggleOpen: () => void;
   known: boolean;
   onToggleKnown: () => void;
+  isFirst: boolean;
+  isLast: boolean;
+  onReorder: (direction: "up" | "down") => Promise<boolean>;
+  onMove: (category: Question["category"]) => Promise<boolean>;
   onSave: (patch: Record<string, unknown>) => Promise<boolean>;
   onDelete: () => void;
 }) {
@@ -514,6 +539,42 @@ function EditableQuestion({
           {known ? "Got it" : "Mark known"}
         </button>
         <span className="flex-1" />
+        {/* Reorder within the category, and move between categories. */}
+        <span className="flex items-center gap-1">
+          <button
+            onClick={() => onReorder("up")}
+            disabled={isFirst}
+            aria-label="Move question up"
+            title="Move up"
+            className="rounded px-1.5 py-0.5 text-ink-3 transition hover:text-ink disabled:opacity-30"
+          >
+            ↑
+          </button>
+          <button
+            onClick={() => onReorder("down")}
+            disabled={isLast}
+            aria-label="Move question down"
+            title="Move down"
+            className="rounded px-1.5 py-0.5 text-ink-3 transition hover:text-ink disabled:opacity-30"
+          >
+            ↓
+          </button>
+        </span>
+        <label className="flex items-center gap-1.5 text-ink-3">
+          <span className="sr-only">Category</span>
+          <select
+            value={q.category}
+            onChange={(e) => onMove(e.target.value as Question["category"])}
+            aria-label="Move question to another category"
+            className="rounded-md border border-border bg-surface px-1.5 py-1 text-[12px] text-ink-2 outline-none transition hover:border-border-strong focus:border-accent"
+          >
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {CATEGORY_META[c].label}
+              </option>
+            ))}
+          </select>
+        </label>
         <button onClick={() => setEditing(true)} className="text-ink-3 transition hover:text-ink-2">Edit</button>
         <button onClick={onDelete} className="text-ink-3 transition hover:text-[#c05663]">
           Delete
@@ -525,11 +586,112 @@ function EditableQuestion({
 
 /* ---------- Flashcards ---------- */
 
+const CONFIDENCE_META: Record<1 | 2 | 3, { label: string; color: string }> = {
+  1: { label: "Shaky", color: "#c05663" },
+  2: { label: "OK", color: "#b4823b" },
+  3: { label: "Solid", color: "#2f8f76" },
+};
+
+// Practice mode — one card at a time, ordered LEAST CONFIDENT FIRST.
+// The order is fixed when the session starts (so rating mid-session doesn't
+// reshuffle under you); the NEXT session re-sorts using the updated scores,
+// which is what "order the next session by what they were least confident
+// about" asks for. Unrated cards sort first — you haven't proved them yet.
+function PracticeMode({
+  cards,
+  confidence,
+  onRate,
+  onExit,
+}: {
+  cards: Flashcard[];
+  confidence: Record<string, number>;
+  onRate: (id: string, score: 1 | 2 | 3) => void;
+  onExit: () => void;
+}) {
+  const [queue] = useState<Flashcard[]>(() =>
+    [...cards].sort((a, b) => (confidence[a.id] ?? 0) - (confidence[b.id] ?? 0))
+  );
+  const [i, setI] = useState(0);
+  const [revealed, setRevealed] = useState(false);
+  const card = queue[i];
+
+  if (!card) {
+    return (
+      <div className="mt-6 rounded-card border border-border bg-surface p-8 text-center shadow-card">
+        <p className="font-display text-[1.4rem] font-semibold text-ink">Session complete</p>
+        <p className="mt-2 text-[14px] text-ink-2">
+          You worked through {queue.length} {queue.length === 1 ? "card" : "cards"}. Next session
+          starts with whatever you rated lowest.
+        </p>
+        <button
+          onClick={onExit}
+          className="btn-gradient mt-6 rounded-full px-5 py-2.5 text-sm font-medium text-white"
+        >
+          Done
+        </button>
+      </div>
+    );
+  }
+
+  const rate = (score: 1 | 2 | 3) => {
+    onRate(card.id, score);
+    setRevealed(false);
+    setI((n) => n + 1);
+  };
+
+  return (
+    <div className="mt-6">
+      <div className="flex items-center justify-between text-[13px] text-ink-3">
+        <span>
+          Card {i + 1} of {queue.length}
+        </span>
+        <button onClick={onExit} className="transition hover:text-ink">
+          Exit practice
+        </button>
+      </div>
+
+      <div className="mt-3 rounded-card border border-border bg-surface p-8 shadow-card">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">Question</p>
+        <p className="mt-3 text-[18px] font-medium leading-snug text-ink">{card.front}</p>
+
+        {revealed ? (
+          <div className="reveal mt-6 border-t border-border pt-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3">Answer</p>
+            <p className="mt-2 text-[15px] leading-relaxed text-ink-2">{card.back}</p>
+            <p className="mt-6 text-[13px] font-medium text-ink-2">How confident were you?</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {([1, 2, 3] as const).map((score) => (
+                <button
+                  key={score}
+                  onClick={() => rate(score)}
+                  className="rounded-full border px-4 py-2 text-[13px] font-medium transition hover:border-border-strong"
+                  style={{ color: CONFIDENCE_META[score].color, borderColor: "var(--border)" }}
+                >
+                  {CONFIDENCE_META[score].label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setRevealed(true)}
+            className="btn-gradient mt-6 rounded-full px-5 py-2.5 text-sm font-medium text-white"
+          >
+            Show answer
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FlashcardsTab({
   kit,
   status,
   known,
   setKnown,
+  confidence,
+  setConfidence,
   onPatch,
   onRegenerate,
   regenerating,
@@ -539,11 +701,28 @@ function FlashcardsTab({
   status: SectionEdit;
   known: Set<string>;
   setKnown: (fn: (s: Set<string>) => Set<string>) => void;
+  confidence: Record<string, number>;
+  setConfidence: (fn: (c: Record<string, number>) => Record<string, number>) => void;
   onPatch: (b: Record<string, unknown>) => Promise<boolean>;
   onRegenerate: () => void;
   regenerating: boolean;
   ask: Ask;
 }) {
+  const [practising, setPractising] = useState(false);
+  const rated = kit.flashcards.filter((f) => confidence[f.id]).length;
+  const shaky = kit.flashcards.filter((f) => (confidence[f.id] ?? 0) === 1).length;
+
+  if (practising) {
+    return (
+      <PracticeMode
+        cards={kit.flashcards}
+        confidence={confidence}
+        onRate={(id, score) => setConfidence((c) => ({ ...c, [id]: score }))}
+        onExit={() => setPractising(false)}
+      />
+    );
+  }
+
   return (
     <div>
       <Toolbar
@@ -551,6 +730,20 @@ function FlashcardsTab({
         onRegenerate={onRegenerate}
         regenerating={regenerating}
       />
+      {kit.flashcards.length > 0 && (
+        <div className="mt-5 flex flex-wrap items-center gap-4 rounded-xl border border-border bg-surface px-4 py-3">
+          <button
+            onClick={() => setPractising(true)}
+            className="btn-gradient rounded-full px-4 py-2 text-[13px] font-medium text-white"
+          >
+            Practise {rated > 0 ? "— weakest first" : "these cards"}
+          </button>
+          <span className="text-[13px] text-ink-3">
+            {rated} of {kit.flashcards.length} rated
+            {shaky > 0 ? ` · ${shaky} shaky` : ""}
+          </span>
+        </div>
+      )}
       {kit.flashcards.length === 0 ? (
         <div className="mt-6">
           <Empty>No flashcards yet.</Empty>

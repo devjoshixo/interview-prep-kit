@@ -10,6 +10,12 @@ export const runtime = "nodejs";
 
 type Section = "questions" | "flashcards";
 const SECTIONS: Section[] = ["questions", "flashcards"];
+const QUESTION_CATEGORIES = new Set([
+  "technical",
+  "behavioural",
+  "system-design",
+  "company-fit",
+]);
 type EditMap = Record<string, "edited" | "user-created">;
 type Item = { id: string; [k: string]: unknown };
 
@@ -87,10 +93,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const { id } = await params;
     const body = (await req.json()) as {
       section?: Section;
-      action?: "edit" | "delete" | "add";
+      action?: "edit" | "delete" | "add" | "reorder" | "move";
       itemId?: string;
       patch?: Record<string, unknown>;
       item?: Record<string, unknown>;
+      direction?: "up" | "down";
+      category?: string;
       version?: number;
     };
     const section = body.section;
@@ -134,6 +142,39 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const newId = `${section === "questions" ? "q" : "fc"}-u${Date.now().toString(36)}`;
       setItems([...items, { ...(body.item ?? {}), id: newId }]);
       editState[section][newId] = "user-created";
+    } else if (body.action === "reorder") {
+      if (body.direction !== "up" && body.direction !== "down") {
+        return NextResponse.json({ error: "invalid direction" }, { status: 400 });
+      }
+      const idx = items.findIndex((x) => x.id === body.itemId);
+      if (idx === -1) return NextResponse.json({ error: "item not found" }, { status: 404 });
+      const step = body.direction === "up" ? -1 : 1;
+      // Questions are grouped by category in the UI, so swap with the nearest
+      // neighbour in the SAME category; flashcards swap with the direct neighbour.
+      const cat = (items[idx] as { category?: string }).category;
+      let j = idx + step;
+      if (section === "questions" && cat) {
+        while (j >= 0 && j < items.length && (items[j] as { category?: string }).category !== cat) {
+          j += step;
+        }
+      }
+      if (j >= 0 && j < items.length) {
+        const next = [...items];
+        [next[idx], next[j]] = [next[j], next[idx]];
+        setItems(next); // already at the end => no-op, still a valid request
+      }
+    } else if (body.action === "move") {
+      if (section !== "questions") {
+        return NextResponse.json({ error: "move applies to questions" }, { status: 400 });
+      }
+      if (typeof body.category !== "string" || !QUESTION_CATEGORIES.has(body.category)) {
+        return NextResponse.json({ error: "invalid category" }, { status: 400 });
+      }
+      const it = items.find((x) => x.id === body.itemId);
+      if (!it) return NextResponse.json({ error: "item not found" }, { status: 404 });
+      (it as { category?: string }).category = body.category;
+      // A hand-moved question is a user decision — lock it against regeneration.
+      if (editState[section][it.id] !== "user-created") editState[section][it.id] = "edited";
     } else {
       return NextResponse.json({ error: "invalid action" }, { status: 400 });
     }
