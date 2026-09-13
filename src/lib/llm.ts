@@ -23,7 +23,31 @@ const DEFAULT_MODEL: Record<string, string> = {
 
 // Transient failures worth retrying: rate limit, overload, gateway errors.
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 529]);
-const MAX_ATTEMPTS = 4;
+const MAX_ATTEMPTS = 5;
+// A provider that rate-limits usually tells us how long to wait. Honour that
+// instead of guessing — but never block a run for longer than this.
+const RETRY_AFTER_CAP_MS = 20_000;
+
+// Free tiers limit TOKENS per minute, not just requests, so a 429 here is normal
+// rather than exceptional. Providers signal the wait either in a `retry-after`
+// header or inside the error body ("Please try again in 2.265s"). Reading it is
+// the difference between riding out the window and falling over on the first
+// "slow down" — which is precisely how a pipeline loses a run.
+export function retryAfterMs(res: Response, body: string): number | null {
+  const header = res.headers.get("retry-after");
+  if (header) {
+    const secs = Number(header);
+    if (Number.isFinite(secs) && secs >= 0) return Math.ceil(secs * 1000);
+  }
+  const match = body.match(/try again in\s+([\d.]+)\s*(ms|s)\b/i);
+  if (match) {
+    const value = Number.parseFloat(match[1]);
+    if (Number.isFinite(value)) {
+      return Math.ceil(match[2].toLowerCase() === "ms" ? value : value * 1000);
+    }
+  }
+  return null;
+}
 // A single provider call that never responds must not hang the job. On abort the
 // fetch throws and is treated as a transient network error (retried below).
 const LLM_TIMEOUT_MS = 20_000;
@@ -161,7 +185,14 @@ export const complete: LlmComplete = async (prompt, opts) => {
       RETRYABLE_STATUS.has(res.status) || /overloaded|unavailable/i.test(detail);
     if (transient && attempt < MAX_ATTEMPTS) {
       lastError = `${res.status}`;
-      await sleep(backoffMs(attempt));
+      // Prefer the provider's own stated wait; fall back to exponential backoff.
+      // The small buffer avoids landing right on the boundary and 429ing again.
+      const advised = retryAfterMs(res, detail);
+      const wait =
+        advised === null
+          ? backoffMs(attempt)
+          : Math.min(advised + 250, RETRY_AFTER_CAP_MS);
+      await sleep(wait);
       continue;
     }
     throw new Error(`llm.complete: ${provider} responded ${res.status}: ${detail}`);

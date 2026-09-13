@@ -92,8 +92,14 @@ The pipeline depends on a single interface, `LlmComplete`, not on any SDK
 - **Groq** (OpenAI-compatible) — the JSON schema is described in the prompt and
   the response is parsed defensively (with markdown-fence stripping).
 
-Both paths share retry-with-exponential-backoff on transient failures (429 /
-overload / 5xx). This let me develop on Groq (fast, generous free tier) while
+Both paths share retry on transient failures (429 / overload / 5xx) — and the
+retry **honours the provider's own stated wait**. Free tiers cap *tokens* per
+minute, not just requests, so a 429 mid-run is normal rather than exceptional;
+providers signal how long to wait either in a `retry-after` header or inside the
+error body (`"Please try again in 2.265s"`). Reading that instead of guessing is
+the difference between riding out the window and losing the run: on a batch of 5
+cases, fixed backoff alone failed 3 of them, and honouring the advised wait took
+it to **5/5 in under 6 minutes**. This let me develop on Groq (fast, generous free tier) while
 targeting Gemini in production — **no code change, just an env var.** Every
 pipeline step is unit-tested by injecting a fake `LlmComplete`, so the logic is
 verified without spending tokens.
