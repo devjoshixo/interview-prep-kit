@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { connectDB } from "../../../../../lib/db";
 import { KitModel } from "../../../../../models/kit";
 import { complete } from "../../../../../lib/llm";
-import { partition, mergeSection, reconcileFresh, type StatusMap } from "../../../../../core/regenerate";
+import {
+  partition,
+  mergeSection,
+  mergeScoped,
+  reconcileFresh,
+  type StatusMap,
+} from "../../../../../core/regenerate";
 import {
   regenerateQuestions,
   regenerateFlashcards,
@@ -17,6 +23,13 @@ export const runtime = "nodejs";
 // allows up to 300s, and the LLM call is itself timed out (src/lib/timeout.ts).
 export const maxDuration = 300;
 
+const QUESTION_CATEGORIES = new Set<Question["category"]>([
+  "technical",
+  "behavioural",
+  "system-design",
+  "company-fit",
+]);
+
 const conflict = () =>
   NextResponse.json({ error: "This kit changed elsewhere.", conflict: true }, { status: 409 });
 
@@ -27,12 +40,16 @@ const conflict = () =>
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const { section, version } = (await req.json()) as {
-      section?: "questions" | "flashcards";
+    const { section, version, category } = (await req.json()) as {
+      section?: "questions" | "flashcards" | "schedule";
       version?: number;
+      category?: Question["category"];
     };
-    if (section !== "questions" && section !== "flashcards") {
+    if (section !== "questions" && section !== "flashcards" && section !== "schedule") {
       return NextResponse.json({ error: "invalid section" }, { status: 400 });
+    }
+    if (category !== undefined && !QUESTION_CATEGORIES.has(category)) {
+      return NextResponse.json({ error: "invalid category" }, { status: 400 });
     }
 
     const uid = await currentUserId();
@@ -50,23 +67,45 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const kit = doc.kit as Kit;
     const editState = (doc.editState ?? {}) as Record<string, StatusMap>;
     const tombstones = (doc.tombstones ?? {}) as Record<string, string[]>;
-    const status = editState[section] ?? {};
-    const avoid = tombstones[section] ?? [];
+    const statusKey = section === "schedule" ? "questions" : section;
+    const status = editState[statusKey] ?? {};
+    const avoid = tombstones[statusKey] ?? [];
     const requirements = kit.role.requirements;
+    const mustIds = new Set(requirements.filter((r) => r.priority === "must").map((r) => r.id));
 
-    if (section === "questions") {
-      const { locked, pristine } = partition(kit.questions, status);
-      const keep = locked.map((l) => l.item.prompt);
-      const fresh = await regenerateQuestions(requirements, keep, avoid, pristine.length, complete);
+    if (section === "schedule") {
+      // The schedule is deterministic — "regenerating" it is a recompute from the
+      // current questions, not an LLM call.
+      kit.schedule = allocateSchedule(kit.questions, kit.schedule.days_available, mustIds);
+    } else if (section === "questions") {
+      // Scope to one category when asked, so regenerating "system-design" leaves
+      // every other category untouched.
+      const scope = (q: Question) => (category ? q.category === category : true);
+      const inScope = kit.questions.filter(scope);
+      const { pristine } = partition(inScope, status);
+      // Keep-list is every existing question, so fresh ones don't duplicate a
+      // question living in another category either.
+      const keep = kit.questions.map((q) => q.prompt);
+      const fresh = await regenerateQuestions(
+        requirements,
+        keep,
+        avoid,
+        pristine.length,
+        complete,
+        category
+      );
       // Never let a short/empty LLM result silently shrink the section.
-      const merged = mergeSection<Question>(locked, reconcileFresh(fresh, pristine), "q");
+      const merged = mergeScoped<Question>(
+        kit.questions,
+        status,
+        scope,
+        reconcileFresh(fresh, pristine),
+        "q"
+      );
       kit.questions = merged.items;
       kit.coverage.uncovered_requirement_ids = findUncovered(requirements, kit.questions);
-      const mustIds = new Set(
-        requirements.filter((r) => r.priority === "must").map((r) => r.id)
-      );
       kit.schedule = allocateSchedule(kit.questions, kit.schedule.days_available, mustIds);
-      editState[section] = merged.status;
+      editState.questions = merged.status;
     } else {
       const { locked, pristine } = partition(kit.flashcards, status);
       const keep = locked.map((l) => l.item.front);

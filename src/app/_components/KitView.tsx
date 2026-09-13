@@ -131,20 +131,27 @@ export default function KitView({
     return res.ok;
   }
 
-  async function regenerate(section: "questions" | "flashcards") {
+  async function regenerate(
+    section: "questions" | "flashcards" | "schedule",
+    category?: Question["category"]
+  ) {
+    const what = category ? `the ${CATEGORY_META[category].label.toLowerCase()} questions` : section;
     const ok = await ask({
-      title: `Regenerate ${section}?`,
-      message: "Your edited and added items are kept — only untouched ones are replaced.",
-      confirmLabel: "Regenerate",
+      title: section === "schedule" ? "Rebuild the plan?" : `Regenerate ${what}?`,
+      message:
+        section === "schedule"
+          ? "The plan is recalculated from your current questions. Nothing else changes."
+          : "Your edited and added items are kept — only untouched ones are replaced.",
+      confirmLabel: section === "schedule" ? "Rebuild" : "Regenerate",
       cancelLabel: "Cancel",
     });
     if (!ok) return;
-    setBusy(`regen:${section}`);
+    setBusy(`regen:${section}${category ? `:${category}` : ""}`);
     try {
       const res = await fetch(`/api/kits/${kitId}/regenerate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ section, version }),
+        body: JSON.stringify({ section, version, category }),
       });
       if (res.status === 409) {
         await reloadOnConflict();
@@ -238,7 +245,7 @@ export default function KitView({
       </div>
 
       <div className="mt-8">
-        {tab === "Overview" && <Overview kit={kit} report={report} />}
+        {tab === "Overview" && <Overview kit={kit} report={report} onPatch={patch} />}
         {tab === "Questions" && (
           <QuestionsTab
             kit={kit}
@@ -247,6 +254,10 @@ export default function KitView({
             setKnown={setKnownQ}
             onPatch={patch}
             onRegenerate={() => regenerate("questions")}
+            onRegenerateCategory={(c) => regenerate("questions", c)}
+            regeneratingCategory={
+              busy?.startsWith("regen:questions:") ? busy.split(":")[2] : null
+            }
             regenerating={busy === "regen:questions"}
             ask={ask}
           />
@@ -265,7 +276,13 @@ export default function KitView({
             ask={ask}
           />
         )}
-        {tab === "Plan" && <PlanTab kit={kit} />}
+        {tab === "Plan" && (
+          <PlanTab
+            kit={kit}
+            onRegenerate={() => regenerate("schedule")}
+            regenerating={busy === "regen:schedule"}
+          />
+        )}
         {tab === "Weak spots" && <WeakSpotsTab kit={kit} spots={weakSpots} />}
       </div>
 
@@ -334,18 +351,79 @@ export default function KitView({
 
 /* ---------- Overview ---------- */
 
-function Overview({ kit, report }: { kit: Kit; report: GenerationReport | null }) {
+function Overview({
+  kit,
+  report,
+  onPatch,
+}: {
+  kit: Kit;
+  report: GenerationReport | null;
+  onPatch: (b: Record<string, unknown>) => Promise<boolean>;
+}) {
+  const [editingBrief, setEditingBrief] = useState(false);
+  const [summary, setSummary] = useState(kit.company_brief.summary);
+  const [whatTheyDo, setWhatTheyDo] = useState(kit.company_brief.what_they_do);
+
   return (
     <div className="space-y-12">
       {report && report.steps?.length > 0 && <GenerationCard report={report} />}
       <Section title="Company brief">
-        {kit.company_brief.summary || kit.company_brief.what_they_do ? (
-          <div className="space-y-3 text-[15px] leading-relaxed text-ink-2">
-            {kit.company_brief.summary && <p>{kit.company_brief.summary}</p>}
-            {kit.company_brief.what_they_do && <p>{kit.company_brief.what_they_do}</p>}
+        {editingBrief ? (
+          <div>
+            <Editor value={summary} onChange={setSummary} placeholder="Summary" />
+            <Editor
+              value={whatTheyDo}
+              onChange={setWhatTheyDo}
+              placeholder="What they do"
+              className="mt-2"
+            />
+            <EditActions
+              onSave={async () => {
+                const ok = await onPatch({
+                  section: "brief",
+                  action: "edit",
+                  patch: { summary, what_they_do: whatTheyDo },
+                });
+                if (ok) setEditingBrief(false);
+              }}
+              onCancel={() => {
+                setSummary(kit.company_brief.summary);
+                setWhatTheyDo(kit.company_brief.what_they_do);
+                setEditingBrief(false);
+              }}
+            />
           </div>
         ) : (
-          <Empty>No brief — the site had nothing to summarize.</Empty>
+          <>
+            {kit.company_brief.summary || kit.company_brief.what_they_do ? (
+              <div className="space-y-3 text-[15px] leading-relaxed text-ink-2">
+                {kit.company_brief.summary && <p>{kit.company_brief.summary}</p>}
+                {kit.company_brief.what_they_do && <p>{kit.company_brief.what_they_do}</p>}
+              </div>
+            ) : (
+              <Empty>No brief — the site had nothing to summarize.</Empty>
+            )}
+            {kit.company_brief.hiring_notes && (
+              <div className="mt-4 rounded-xl border border-accent-soft bg-accent-soft/30 p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">
+                  How they interview
+                </p>
+                <p className="mt-1.5 text-[14px] leading-relaxed text-ink-2">
+                  {kit.company_brief.hiring_notes}
+                </p>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                setSummary(kit.company_brief.summary);
+                setWhatTheyDo(kit.company_brief.what_they_do);
+                setEditingBrief(true);
+              }}
+              className="mt-4 text-[13px] font-medium text-ink-3 transition hover:text-ink-2"
+            >
+              Edit brief
+            </button>
+          </>
         )}
         {kit.company_brief.sources.length > 0 && (
           <p className="mt-4 break-words text-xs text-ink-3">{kit.company_brief.sources.join("   ·   ")}</p>
@@ -382,6 +460,8 @@ function QuestionsTab({
   setKnown,
   onPatch,
   onRegenerate,
+  onRegenerateCategory,
+  regeneratingCategory,
   regenerating,
   ask,
 }: {
@@ -391,6 +471,8 @@ function QuestionsTab({
   setKnown: (fn: (s: Set<string>) => Set<string>) => void;
   onPatch: (b: Record<string, unknown>) => Promise<boolean>;
   onRegenerate: () => void;
+  onRegenerateCategory: (category: Question["category"]) => void;
+  regeneratingCategory: string | null;
   regenerating: boolean;
   ask: Ask;
 }) {
@@ -416,6 +498,18 @@ function QuestionsTab({
                 <span className="h-1.5 w-1.5 rounded-full" style={{ background: meta.dot }} />
                 <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-2">{meta.label}</span>
                 <span className="text-[11px] text-ink-3">{qs.length}</span>
+                <span className="flex-1" />
+                {/* Regenerate just this category — the rest of the bank is untouched. */}
+                <button
+                  onClick={() => onRegenerateCategory(cat)}
+                  disabled={regeneratingCategory === cat}
+                  className="flex items-center gap-1.5 text-[12px] font-medium text-ink-3 transition hover:text-accent disabled:opacity-60"
+                >
+                  {regeneratingCategory === cat && (
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                  )}
+                  {regeneratingCategory === cat ? "Regenerating…" : "Regenerate"}
+                </button>
               </div>
               <ul className="space-y-3">
                 {qs.map((q, i) => (
@@ -883,13 +977,33 @@ function EditableFlashcard({
 
 /* ---------- Plan ---------- */
 
-function PlanTab({ kit }: { kit: Kit }) {
+function PlanTab({
+  kit,
+  onRegenerate,
+  regenerating,
+}: {
+  kit: Kit;
+  onRegenerate: () => void;
+  regenerating: boolean;
+}) {
   const [open, setOpen] = useState<number | null>(null);
   if (kit.schedule.days.length === 0) return <Empty>No plan — add questions first.</Empty>;
   const byId = new Map(kit.questions.map((q) => [q.id, q]));
   return (
     <div>
-      <p className="mb-3 text-[13px] text-ink-3">Tap a day to see its questions.</p>
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <p className="text-[13px] text-ink-3">Tap a day to see its questions.</p>
+        <button
+          onClick={onRegenerate}
+          disabled={regenerating}
+          className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-surface px-3.5 py-2 text-[13px] font-medium text-ink-2 transition hover:border-border-strong hover:text-ink disabled:opacity-60"
+        >
+          {regenerating && (
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+          )}
+          {regenerating ? "Rebuilding…" : "Rebuild plan"}
+        </button>
+      </div>
       <ol className="overflow-hidden rounded-xl border border-border">
         {kit.schedule.days.map((d) => {
           const meta = CATEGORY_META[d.focus as Question["category"]];

@@ -4,10 +4,55 @@ import {
   mergeSection,
   replacementCount,
   reconcileFresh,
+  mergeScoped,
   type StatusMap,
 } from "../src/core/regenerate";
 
 type Item = { id: string; text: string };
+
+describe("mergeScoped (per-category regeneration)", () => {
+  type Q = { id: string; text: string; category: string };
+  const items: Q[] = [
+    { id: "q-1", text: "tech kept", category: "technical" },
+    { id: "q-2", text: "sd old A", category: "system-design" },
+    { id: "q-3", text: "sd edited", category: "system-design" },
+    { id: "q-4", text: "tech other", category: "technical" },
+    { id: "q-5", text: "sd old B", category: "system-design" },
+  ];
+  const status: StatusMap = { "q-3": "edited" };
+  const inScope = (q: Q) => q.category === "system-design";
+
+  it("replaces only pristine in-scope items and leaves the rest in place", () => {
+    const fresh: Q[] = [
+      { id: "n-1", text: "sd NEW A", category: "system-design" },
+      { id: "n-2", text: "sd NEW B", category: "system-design" },
+    ];
+    const out = mergeScoped(items, status, inScope, fresh, "q");
+    expect(out.items.map((i) => i.text)).toEqual([
+      "tech kept", // untouched, other category
+      "sd NEW A", // replaced
+      "sd edited", // locked, kept verbatim in place
+      "tech other", // untouched, other category
+      "sd NEW B", // replaced
+    ]);
+  });
+
+  it("reassigns ids contiguously and re-keys the status map", () => {
+    const fresh: Q[] = [
+      { id: "n-1", text: "a", category: "system-design" },
+      { id: "n-2", text: "b", category: "system-design" },
+    ];
+    const out = mergeScoped(items, status, inScope, fresh, "q");
+    expect(out.items.map((i) => i.id)).toEqual(["q-1", "q-2", "q-3", "q-4", "q-5"]);
+    expect(out.status).toEqual({ "q-3": "edited" }); // the edited item is still 3rd
+  });
+
+  it("never touches another category's items", () => {
+    const out = mergeScoped(items, status, inScope, [], "q");
+    const technical = out.items.filter((i) => i.category === "technical").map((i) => i.text);
+    expect(technical).toEqual(["tech kept", "tech other"]);
+  });
+});
 
 describe("reconcileFresh (no silent shrink / no inflation on regenerate)", () => {
   const pristine: Item[] = [

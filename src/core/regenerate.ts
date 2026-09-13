@@ -65,6 +65,45 @@ export function replacementCount<T extends { id: string }>(
   return partition(items, status).pristine.length;
 }
 
+// Replace ONLY the pristine items that fall inside a scope (e.g. one question
+// category), leaving every other item — locked or out-of-scope — exactly where it
+// is. Used by per-category regeneration: regenerating "system-design" must not
+// disturb the technical questions, and must not renumber them into a collision.
+// Ids are reassigned contiguously across the whole section afterwards, and the
+// returned status map is keyed by the new ids.
+export function mergeScoped<T extends { id: string }>(
+  items: T[],
+  status: StatusMap,
+  inScope: (item: T) => boolean,
+  fresh: T[],
+  idPrefix: string
+): { items: T[]; status: StatusMap } {
+  const queue = [...fresh];
+  const ordered: { item: T; st?: EditStatus }[] = [];
+
+  for (const item of items) {
+    const st = status[item.id];
+    if (!st && inScope(item)) {
+      const replacement = queue.shift();
+      if (replacement) ordered.push({ item: replacement, st: undefined });
+      // no replacement available => the slot is dropped (reconcileFresh normally
+      // guarantees a 1:1 count, so this is a belt-and-braces path)
+    } else {
+      ordered.push({ item, st });
+    }
+  }
+  for (const extra of queue) ordered.push({ item: extra, st: undefined });
+
+  const out: T[] = [];
+  const outStatus: StatusMap = {};
+  ordered.forEach((entry, i) => {
+    const id = `${idPrefix}-${i + 1}`;
+    out.push({ ...entry.item, id });
+    if (entry.st) outStatus[id] = entry.st;
+  });
+  return { items: out, status: outStatus };
+}
+
 // Reconcile freshly generated items against the pristine slots they replace.
 // Two failure modes to guard against, both otherwise silent:
 //   - the model returns MORE than requested -> cap to the pristine count so the

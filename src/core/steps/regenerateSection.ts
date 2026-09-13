@@ -45,14 +45,22 @@ export async function regenerateQuestions(
   keep: string[],
   avoid: string[],
   count: number,
-  llm: LlmComplete
+  llm: LlmComplete,
+  // When given, regenerate ONE category only: the model is told to stay in it and
+  // the result is forced to it, so a per-category regenerate can't leak questions
+  // into a category the user didn't ask to touch.
+  category?: Question["category"]
 ): Promise<Question[]> {
   if (count <= 0) return [];
   const validIds = new Set(requirements.map((r) => r.id));
   const reqList = requirements.map((r) => `- ${r.id} [${r.priority}] ${r.text}`).join("\n");
   const prompt = [
-    `Generate ${count} NEW interview questions for the role.`,
-    `- pick a category per question from: ${CATEGORIES.join(", ")};`,
+    category
+      ? `Generate ${count} NEW interview questions in the "${category}" category for the role.`
+      : `Generate ${count} NEW interview questions for the role.`,
+    category
+      ? `- EVERY question must be in the "${category}" category;`
+      : `- pick a category per question from: ${CATEGORIES.join(", ")};`,
     "- reference requirement ids ONLY from the list below;",
     "- include an answer_outline and a difficulty of 1, 2, or 3.",
     keepAvoidLines(keep, avoid),
@@ -63,7 +71,8 @@ export async function regenerateQuestions(
   try {
     const raw = await llm(prompt, { schema: QUESTION_SCHEMA });
     const parsed = JSON.parse(raw);
-    return groundGapFill(validIds, Array.isArray(parsed) ? parsed : [], 0);
+    const grounded = groundGapFill(validIds, Array.isArray(parsed) ? parsed : [], 0);
+    return category ? grounded.map((q) => ({ ...q, category })) : grounded;
   } catch {
     return [];
   }

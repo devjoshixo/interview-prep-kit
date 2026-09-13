@@ -92,7 +92,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   try {
     const { id } = await params;
     const body = (await req.json()) as {
-      section?: Section;
+      section?: Section | "brief";
       action?: "edit" | "delete" | "add" | "reorder" | "move";
       itemId?: string;
       patch?: Record<string, unknown>;
@@ -102,7 +102,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       version?: number;
     };
     const section = body.section;
-    if (!section || !SECTIONS.includes(section)) {
+    if (!section || (section !== "brief" && !SECTIONS.includes(section))) {
       return NextResponse.json({ error: "invalid section" }, { status: 400 });
     }
 
@@ -123,6 +123,26 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const tombstones = (doc.tombstones ?? {}) as Record<string, string[]>;
     editState[section] ??= {};
     tombstones[section] ??= [];
+
+    // The brief is a single object, not a list — handle it before the list logic.
+    if (section === "brief") {
+      if (body.action !== "edit") {
+        return NextResponse.json({ error: "invalid action" }, { status: 400 });
+      }
+      const p = body.patch ?? {};
+      if (typeof p.summary === "string") kit.company_brief.summary = p.summary.trim();
+      if (typeof p.what_they_do === "string") {
+        kit.company_brief.what_they_do = p.what_they_do.trim();
+      }
+      editState.brief = { brief: "edited" };
+      const briefRes = await KitModel.updateOne(
+        { _id: id, userId: uid, version: current },
+        { $set: { kit, editState }, $inc: { version: 1 } }
+      );
+      if (briefRes.matchedCount === 0) return conflict();
+      return NextResponse.json({ kit, editState, version: current + 1 });
+    }
+
     const items = (kit as unknown as Record<string, Item[]>)[section];
     const setItems = (next: Item[]) => {
       (kit as unknown as Record<string, Item[]>)[section] = next;

@@ -198,6 +198,15 @@ items as a *keep* list and the tombstones as an *avoid* list, then merges the fr
 items **around** the locked ones. Locked content never round-trips the model (so it
 can't be paraphrased), which is both the correctness guarantee and a cost saving.
 
+**Regeneration is granular.** You can regenerate **one question category on its own**
+("regenerate just the system-design questions") without disturbing the other three —
+`mergeScoped` replaces only the pristine items inside that scope, leaves locked and
+out-of-scope items exactly where they are, and reassigns ids across the whole section
+afterwards so nothing collides. Flashcards regenerate as a section, the **company
+brief is editable inline**, and the **schedule rebuilds deterministically** (it's
+arithmetic over the current questions, so "regenerate" there is a recompute, not an
+LLM call).
+
 **Reordering and moving** are first-class alongside edit/add/delete: a question can
 be moved up/down **within its category** (buttons rather than drag, so it works from
 the keyboard) and **moved to another category** via a select, which validates
