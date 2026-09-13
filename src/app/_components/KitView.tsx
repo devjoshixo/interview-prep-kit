@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import HomeLink from "./HomeLink";
+import { computeWeakSpots, type WeakSpot } from "../../core/weakSpots";
 import type { ReactNode } from "react";
 import type { GenerationReport } from "../../models/kit";
 import type { Kit, Question, Flashcard } from "../../core/types";
@@ -34,7 +35,7 @@ const DIFF_META: Record<1 | 2 | 3, { label: string; color: string }> = {
   3: { label: "Hard", color: "#c05663" },
 };
 
-const TABS = ["Overview", "Questions", "Flashcards", "Plan"] as const;
+const TABS = ["Overview", "Questions", "Flashcards", "Plan", "Weak spots"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function KitView({
@@ -179,11 +180,18 @@ export default function KitView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx]);
 
+  const weakSpots = computeWeakSpots(kit, {
+    knownQuestions: knownQ,
+    cardConfidence: confidence,
+  });
+  const atRisk = weakSpots.filter((s) => s.risk > 0.5).length;
+
   const counts: Record<Tab, number | undefined> = {
     Overview: undefined,
     Questions: kit.questions.length,
     Flashcards: kit.flashcards.length,
     Plan: kit.schedule.days.length,
+    "Weak spots": atRisk || undefined,
   };
 
   return (
@@ -258,6 +266,7 @@ export default function KitView({
           />
         )}
         {tab === "Plan" && <PlanTab kit={kit} />}
+        {tab === "Weak spots" && <WeakSpotsTab kit={kit} spots={weakSpots} />}
       </div>
 
       <div className="h-24" />
@@ -958,6 +967,114 @@ function PlanTab({ kit }: { kit: Kit }) {
           );
         })}
       </ol>
+    </div>
+  );
+}
+
+/* ---------- Weak spots (creative feature) ---------- */
+
+function WeakSpotsTab({ kit, spots }: { kit: Kit; spots: WeakSpot[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (spots.length === 0) return <Empty>No requirements extracted, so nothing to rank yet.</Empty>;
+
+  const questionById = new Map(kit.questions.map((q) => [q.id, q]));
+  const cardById = new Map(kit.flashcards.map((f) => [f.id, f]));
+  const top = spots.filter((s) => s.risk > 0);
+
+  return (
+    <div>
+      <div className="rounded-card border border-border bg-surface p-5 shadow-card">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
+          Where you&apos;re most exposed
+        </p>
+        <p className="mt-2 text-[15px] leading-relaxed text-ink-2">
+          Ranked by <strong className="text-ink">what the employer marked must-have</strong> against{" "}
+          <strong className="text-ink">how you&apos;ve actually rated yourself</strong> — not just
+          which cards are shaky. Practise the top of this list first.
+        </p>
+      </div>
+
+      {top.length === 0 ? (
+        <div className="mt-6">
+          <Empty>Nothing at risk — you&apos;ve rated every requirement&apos;s material as solid.</Empty>
+        </div>
+      ) : (
+        <ul className="mt-6 space-y-3">
+          {top.map((s, i) => {
+            const isOpen = open === s.requirement.id;
+            const pct = Math.round(s.mastery * 100);
+            const material = s.questionIds.length + s.flashcardIds.length;
+            return (
+              <li key={s.requirement.id} className="rounded-xl border border-border bg-surface p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[12px] font-semibold text-ink-3">#{i + 1}</span>
+                      <span className="text-[15px] font-medium text-ink">{s.requirement.text}</span>
+                      <span
+                        className="rounded-chip px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                        style={{
+                          color: s.requirement.priority === "must" ? "#c05663" : "#b4823b",
+                          background:
+                            s.requirement.priority === "must" ? "#c0566315" : "#b4823b15",
+                        }}
+                      >
+                        {s.requirement.priority === "must" ? "Must-have" : "Nice to have"}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-[13px] text-ink-3">
+                      {material === 0
+                        ? "No questions or cards cover this yet"
+                        : `${pct}% mastered · ${s.questionIds.length} question${
+                            s.questionIds.length === 1 ? "" : "s"
+                          }, ${s.flashcardIds.length} card${s.flashcardIds.length === 1 ? "" : "s"}`}
+                      {s.untouched && material > 0 ? " · not practised yet" : ""}
+                    </p>
+                  </div>
+                  {material > 0 && (
+                    <button
+                      onClick={() => setOpen(isOpen ? null : s.requirement.id)}
+                      aria-expanded={isOpen}
+                      className="shrink-0 text-[13px] font-medium text-accent transition hover:text-accent-hover"
+                    >
+                      {isOpen ? "Hide" : "Drill"}
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-border">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${pct}%`,
+                      background: pct >= 67 ? "#2f8f76" : pct >= 34 ? "#b4823b" : "#c05663",
+                    }}
+                  />
+                </div>
+
+                {isOpen && (
+                  <div className="reveal mt-4 border-t border-border pt-3">
+                    <ul className="space-y-2 text-[14px]">
+                      {s.questionIds.map((id) => (
+                        <li key={id} className="flex gap-2 text-ink-2">
+                          <span className="text-[11px] uppercase tracking-wide text-ink-3">Q</span>
+                          <span>{questionById.get(id)?.prompt}</span>
+                        </li>
+                      ))}
+                      {s.flashcardIds.map((id) => (
+                        <li key={id} className="flex gap-2 text-ink-2">
+                          <span className="text-[11px] uppercase tracking-wide text-ink-3">Card</span>
+                          <span>{cardById.get(id)?.front}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

@@ -240,10 +240,36 @@ Durations are integer minutes throughout (10/15/20 by difficulty).
 
 ---
 
-## Creative feature
+## Creative feature — the Weak Spots report
+
+**The problem it solves.** The night before an interview you don't need another
+list of cards — you need to know *what you're most likely to get burned on*. A
+flashcard app can tell you which cards feel shaky. It can't tell you that the thing
+you're shaky on is the requirement the employer explicitly marked **must-have**.
+
+**What it does.** A dedicated **Weak spots** tab ranks every extracted requirement
+by risk: `risk = (1 − mastery) × priority weight`, where mastery is the average of
+your own practice signals attached to that requirement (question marked known,
+flashcard confidence — an *unrated* card counts as zero, because you haven't proved
+it). Must-haves outrank nice-to-haves at equal mastery, and ties break toward the
+requirement with the **least material to practise against**, since thin coverage is
+itself a risk. Each row expands into the exact questions and cards to drill.
+
+**Why it's genuinely this app's feature and not a bolt-on.** It only works because
+every question and flashcard already carries `requirement_ids` — the same grounding
+decision that makes coverage checkable rather than a matter of opinion. The weak
+spots report is that graph **turned around**: coverage asks "does every requirement
+have a question?", this asks "of the requirements that do, which ones am I still
+weakest on, weighted by how much the employer cares?" No extra LLM call, no schema
+change — it's pure code over data the pipeline already produces
+(`src/core/weakSpots.ts`, unit-tested).
+
+---
+
+## Practice mode & the study app (Section 7)
 
 The kit isn't a document — it's a **study tool**. The `/kit/[id]` view is a tabbed
-app (Overview / Questions / Flashcards / Plan) built for active recall:
+app (Overview / Questions / Flashcards / Plan / Weak spots) built for active recall:
 
 - **Practice mode — weakest first.** Step through cards **one at a time**, reveal
   the answer, then record how confident you felt (*Shaky / OK / Solid*). The queue
