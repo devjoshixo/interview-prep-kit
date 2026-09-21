@@ -125,6 +125,23 @@ describe("normalizeCompanyUrl (M1 — a scheme-less URL must not silently break 
     expect(normalizeCompanyUrl("")).toBe("");
     expect(normalizeCompanyUrl("   ")).toBe("");
   });
+
+  // Every company enters at its homepage. A pasted route points at the same
+  // company by another door; without this the crawl would treat that page as home
+  // and rank the links found on it.
+  it("drops the path, query and fragment so the crawl always starts at home", () => {
+    expect(normalizeCompanyUrl("acme.com/contact")).toBe("https://acme.com");
+    expect(normalizeCompanyUrl("https://acme.com/careers/engineering?ref=x#top")).toBe(
+      "https://acme.com"
+    );
+    expect(normalizeCompanyUrl("acme.com/")).toBe("https://acme.com");
+  });
+
+  it("keeps an explicit port", () => {
+    expect(normalizeCompanyUrl("http://localhost:3000/some/page")).toBe(
+      "http://localhost:3000"
+    );
+  });
 });
 
 describe("visitSite normalizes a scheme-less URL before fetching (M1)", () => {

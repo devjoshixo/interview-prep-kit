@@ -45,11 +45,25 @@ const EMPTY_BRIEF: CompanyBrief = { summary: "", what_they_do: "", sources: [] }
 // `new URL()` and `fetch` — silently yielding an empty brief. Prepend https:// so
 // a scheme-less URL still works; leave an explicit scheme alone; keep blank blank
 // (honest-none — never fabricate a URL the user didn't give).
+// The path is also DROPPED, so every company enters the pipeline at its homepage.
+// Someone pasting `acme.com/contact` is pointing at the same company by a different
+// route, not asking for a different brief — and without this the crawl treats the
+// contact page as home and ranks the links found on IT. Dropping the route here is
+// what lets the cache key agree with what actually gets fetched.
+// Scheme and `www.` are left as given: a site may redirect one to the other, and
+// `fetchPage` follows redirects anyway.
 export function normalizeCompanyUrl(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "";
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed; // has a scheme
-  return `https://${trimmed}`;
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+  try {
+    const u = new URL(withScheme);
+    return `${u.protocol}//${u.host}`; // `host` keeps an explicit port
+  } catch {
+    return withScheme; // unparseable: hand it on unchanged rather than throw
+  }
 }
 
 function asString(x: unknown): string {
