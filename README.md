@@ -6,6 +6,9 @@ categorised question bank, flashcards, and a day-by-day study plan.
 
 Live demo: **https://interview-prep-kit-sigma.vercel.app** · Batch entrypoint: `npm run evaluate`
 
+Field manual: **[docs/prep-kit-reference.html](docs/prep-kit-reference.html)** — every step,
+every gate that constrains the model, the constant index and a glossary. Open it in a browser.
+
 > Sign up with any email and a password of 8+ characters — there's no email
 > verification, so it takes about ten seconds. Kits are private to the account
 > that made them.
