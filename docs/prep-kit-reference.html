@@ -165,32 +165,41 @@ svg{display:block;max-width:100%}
     <li><a href="#pipeline">The pipeline, end to end</a></li>
   </ol>
   <div class="toc-sep">The eight steps</div>
-  <ol start="3">
-    <li><a href="#readjd">1 · Read the JD</a></li>
-    <li><a href="#visit">2 · Visit the site</a></li>
-    <li><a href="#search">3 · Search the web</a></li>
-    <li><a href="#questions">4 · Make questions</a></li>
-    <li><a href="#coverage">5–6 · Coverage and gap fill</a></li>
-    <li><a href="#schedule">7 · Schedule</a></li>
-    <li><a href="#flashcards">8 · Flashcards</a></li>
+  <ol>
+    <li><a href="#readjd">1 &middot; Read the JD</a></li>
+    <li><a href="#visit">2 &middot; Visit the site</a></li>
+    <li><a href="#search">3 &middot; Search the web</a></li>
+    <li><a href="#questions">4 &middot; Make questions</a></li>
+    <li><a href="#coverage">5&ndash;6 &middot; Coverage and gap fill</a></li>
+    <li><a href="#schedule">7 &middot; Schedule</a></li>
+    <li><a href="#flashcards">8 &middot; Flashcards</a></li>
   </ol>
   <div class="toc-sep">Cross-cutting</div>
-  <ol start="10">
+  <ol>
     <li><a href="#gates">The gate catalogue</a></li>
     <li><a href="#purity">Purity and the test seam</a></li>
     <li><a href="#resilience">Resilience and honest-none</a></li>
+    <li><a href="#auth">Auth and sessions</a></li>
+    <li><a href="#api">The API surface</a></li>
     <li><a href="#state">The edit state model</a></li>
+    <li><a href="#regen">Regeneration in full</a></li>
     <li><a href="#cas">Optimistic concurrency</a></li>
     <li><a href="#weakspots">Weak spots</a></li>
   </ol>
+  <div class="toc-sep">The rest of the app</div>
+  <ol>
+    <li><a href="#infra">Persistence, config, batch runner</a></li>
+    <li><a href="#frontend">The frontend map</a></li>
+    <li><a href="#tests">The test suite</a></li>
+  </ol>
   <div class="toc-sep">v2 and beyond</div>
-  <ol start="16">
+  <ol>
     <li><a href="#defect">The defect v2 is built on</a></li>
     <li><a href="#v2">v2: six items, one chain</a></li>
     <li><a href="#built">What exists today</a></li>
   </ol>
   <div class="toc-sep">Reference</div>
-  <ol start="19">
+  <ol>
     <li><a href="#defend">Defending it out loud</a></li>
     <li><a href="#constants">Constant index</a></li>
     <li><a href="#glossary">Glossary</a></li>
@@ -764,7 +773,10 @@ real <code>fetch</code>, the real Tavily. Tests pass canned HTML and scripted mo
     <tr><td><code>findUncovered</code></td><td><code>coverage.ts</code></td><td>Set difference</td></tr>
     <tr><td><code>allocateSchedule</code></td><td><code>schedule.ts</code></td><td>Sort + greedy pack</td></tr>
     <tr><td><code>computeWeakSpots</code></td><td><code>weakSpots.ts</code></td><td>Risk arithmetic</td></tr>
-    <tr><td><code>partition</code>, <code>mergeSection</code></td><td><code>regenerate.ts</code></td><td>The edit state model</td></tr>
+    <tr><td><code>partition</code>, <code>mergeSection</code>, <code>mergeScoped</code>, <code>reconcileFresh</code>, <code>replacementCount</code></td><td><code>regenerate.ts</code></td><td>The edit state model and the no-shrink guard</td></tr>
+    <tr><td><code>hashPassword</code>, <code>verifyPassword</code>, <code>signSession</code>, <code>verifySession</code></td><td><code>auth.ts</code></td><td>scrypt hashing and cookie signing</td></tr>
+    <tr><td><code>rateLimit</code>, <code>clientIp</code></td><td><code>rateLimit.ts</code></td><td>Fixed-window counting (injectable clock)</td></tr>
+    <tr><td><code>loadEnvFile</code></td><td><code>env.ts</code></td><td>.env parsing for the CLI</td></tr>
     <tr><td><code>parseJsonArray</code></td><td><code>parseArray.ts</code></td><td>Tolerant array parsing</td></tr>
     <tr><td><code>validateKit</code></td><td><code>validate.ts</code></td><td>Whole-kit structural check</td></tr>
     <tr><td><code>isBlockedIp</code></td><td><code>ssrf.ts</code></td><td>Private-range detection</td></tr>
@@ -875,7 +887,244 @@ because a declared length is a claim by an untrusted host.</p>
   file as “a crawler.”</p>
 </div>
 
-<h2 id="state"><span class="num">13</span>The edit state model</h2>
+<h2 id="auth"><span class="num">13</span>Auth and sessions</h2>
+
+<p><code>src/lib/auth.ts</code>, 77 lines, no dependency beyond <code>node:crypto</code>. Small enough to
+hold in your head and a standard interview surface, so it is worth knowing line by line.</p>
+
+<h3>Password storage</h3>
+
+<pre><code>export function hashPassword(password: string): { hash: string; salt: string } {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(password, salt, 64).toString("hex");
+  return { hash, salt };
+}
+
+export function verifyPassword(password: string, hash: string, salt: string): boolean {
+  const computed = scryptSync(password, salt, 64);
+  const stored = Buffer.from(hash, "hex");
+  return computed.length === stored.length &amp;&amp; timingSafeEqual(computed, stored);
+}</code></pre>
+
+<p>Four decisions in nine lines:</p>
+
+<ul>
+  <li><strong>scrypt, not SHA-256.</strong> A general-purpose hash is <em>fast</em>, which is exactly
+  wrong for passwords — fast means a GPU can try billions of candidates per second. scrypt is
+  deliberately slow and <strong>memory-hard</strong>, so parallel hardware attacks get expensive rather
+  than cheap. bcrypt and argon2 are the other right answers; SHA is not one of them.</li>
+  <li><strong>A fresh 16-byte salt per user.</strong> Identical passwords produce different hashes, so a
+  precomputed rainbow table is useless and cracking one account tells you nothing about the next.</li>
+  <li><strong><code>timingSafeEqual</code>, not <code>===</code>.</strong> String comparison short-circuits
+  at the first differing byte, so how long it takes leaks how much of the value you guessed correctly.
+  Constant-time comparison removes the signal.</li>
+  <li><strong>The length check comes first.</strong> <code>timingSafeEqual</code> throws on mismatched
+  lengths rather than returning false, so comparing lengths up front turns a crash into a clean
+  <code>false</code>.</li>
+</ul>
+
+<h3>The session cookie</h3>
+
+<pre><code>export function signSession(userId: string): string {
+  const sig = createHmac("sha256", secret()).update(userId).digest("hex");
+  return `${userId}.${sig}`;
+}</code></pre>
+
+<p>Stateless: the cookie carries the user id plus an HMAC over it, and the signature is recomputed and
+compared on every request. No session table, no lookup, no server-side state to expire.</p>
+
+<div class="note">
+  <span class="tag">Why <code>lastIndexOf(".")</code> and not <code>split(".")</code></span>
+  <p><code>verifySession</code> splits on the <em>last</em> dot. A Mongo <code>ObjectId</code> has no
+  dots today, but splitting on the first one would break silently the moment a user id ever contained
+  one — and silently means everybody is logged out and nobody knows why. Parsing from the end is
+  correct because the signature is the part with a known shape.</p>
+</div>
+
+<h3>The production hard-fail</h3>
+
+<pre><code>function secret(): string {
+  const s = process.env.SESSION_SECRET;
+  if (s) return s;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("SESSION_SECRET is not set — refusing to sign sessions with a default secret");
+  }
+  return "insecure-dev-secret-change-me";
+}</code></pre>
+
+<div class="keystone">
+  <p>Without a real secret, session cookies would be signed with a value that is public in the source —
+  so anyone could forge a cookie for any user id and log in as them. In production the app refuses to
+  start signing rather than do that.</p>
+</div>
+
+<p>This is the "fail closed" principle applied to configuration: a missing secret is not a degraded mode,
+it is an unauthenticated app. The dev fallback keeps local work friction-free, and the split is on
+<code>NODE_ENV</code> so it cannot accidentally ship. It is covered by a test —
+<em>"session secret hard-fail (C2 — no forgeable cookies in prod)"</em>.</p>
+
+<h3>Cookie flags</h3>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Flag</th><th>Value</th><th>Stops</th></tr></thead>
+  <tbody>
+    <tr><td><code>httpOnly</code></td><td>true</td><td>JavaScript reading the cookie — so an XSS bug cannot steal the session</td></tr>
+    <tr><td><code>sameSite</code></td><td><code>lax</code></td><td>CSRF on cross-site POSTs, while keeping normal navigation working</td></tr>
+    <tr><td><code>secure</code></td><td>true in production</td><td>The cookie travelling over plain HTTP</td></tr>
+    <tr><td><code>maxAge</code></td><td>30 days</td><td>Indefinite sessions</td></tr>
+    <tr><td><code>path</code></td><td><code>/</code></td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="note warn">
+  <span class="tag">Known gaps, worth naming before someone else does</span>
+  <p><strong>No revocation.</strong> A stateless signed cookie cannot be invalidated server-side — logout
+  deletes it from the browser, but a copied cookie stays valid for 30 days. Fixing it means either a
+  token version per user checked on each request, or a server-side session store, and both give up the
+  statelessness.</p>
+  <p><strong>No expiry inside the signature.</strong> The 30 days is enforced by the browser honouring
+  <code>maxAge</code>, not by anything in the token. A cookie replayed by a non-browser client never
+  expires. Signing <code>userId.expiresAt</code> instead of <code>userId</code> would close it.</p>
+  <p><strong>No password reset or email verification</strong> — appropriate for the scope, and stated as
+  such in the README rather than left to be discovered.</p>
+</div>
+
+<h2 id="api"><span class="num">14</span>The API surface</h2>
+
+<p>Seven route handlers, 543 lines. Every one of them repeats the same four-step opening, and the
+repetition is the point — there is no middleware doing it invisibly.</p>
+
+<pre><code>const uid = await currentUserId();                       // 1. who are you
+if (!uid) return NextResponse.json({ error: "sign in required" }, { status: 401 });
+await connectDB();                                       // 2. connect (cached)
+const doc = await KitModel.findById(id).catch(() =&gt; null);
+if (!doc || String(doc.userId) !== uid) {                // 3. is it yours
+  return NextResponse.json({ error: "not found" }, { status: 404 });
+}</code></pre>
+
+<div class="note">
+  <span class="tag">404, not 403 — and that is deliberate</span>
+  <p>Someone else's kit returns <em>not found</em>, not <em>forbidden</em>. A 403 confirms the id exists,
+  which lets an attacker enumerate valid ids. 404 leaks nothing. The same reasoning is why login returns
+  <code>"invalid email or password"</code> for both a wrong password and an unknown account.</p>
+</div>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Route</th><th>Method</th><th>Does</th></tr></thead>
+  <tbody>
+    <tr><td><code>/api/kits</code></td><td>POST</td><td>Create a job, rate-limit, return an id immediately, run the pipeline in the background</td></tr>
+    <tr><td><code>/api/kits/[id]</code></td><td>GET</td><td>Poll status and progress; runs the stuck-job watchdog</td></tr>
+    <tr><td><code>/api/kits/[id]</code></td><td>PATCH</td><td>edit · delete · add · reorder · move — all under the version CAS</td></tr>
+    <tr><td><code>/api/kits/[id]/regenerate</code></td><td>POST</td><td>Regenerate a section or one question category, CAS on commit</td></tr>
+    <tr><td><code>/api/kits/[id]/retry</code></td><td>POST</td><td>Re-run a failed job, guarded by a CAS on <code>status</code></td></tr>
+    <tr><td><code>/api/auth/signup</code></td><td>POST</td><td>Validate, check uniqueness, hash, create, set session</td></tr>
+    <tr><td><code>/api/auth/login</code></td><td>POST</td><td>Verify, set session</td></tr>
+    <tr><td><code>/api/auth/logout</code></td><td>POST</td><td>Clear the cookie</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Create: return instantly, generate afterwards</h3>
+
+<pre><code>export const maxDuration = 300;   // Fluid Compute on Hobby allows up to 300s
+...
+const doc = await KitModel.create({ userId, status: "generating",
+                                    progress: { step: 0, label: "Starting" }, inputs, kit: {} });
+after(() =&gt; runGeneration(id, { jd, company_url, days }));   // &lt;- after the response is sent
+return NextResponse.json({ id });</code></pre>
+
+<p>A generation takes 18–30 seconds. Holding an HTTP request open that long is a bad idea on any host
+and impossible on some. So the route writes a <code>generating</code> row, returns the id, and hands the
+pipeline to <code>after()</code> — which keeps the function alive past the response on serverless and
+also works on a long-running host. The client polls GET.</p>
+
+<p>The 300-second ceiling is headroom, not an expectation: a slow-but-healthy run finishes instead of
+being killed mid-way. And because <em>every</em> outbound call has its own timeout, a hung upstream
+cannot consume that budget.</p>
+
+<h3>The watchdog</h3>
+
+<pre><code>const STUCK_MS = 6 * 60 * 1000;   // must EXCEED maxDuration (300s)
+
+if (status === "generating" &amp;&amp; doc.createdAt) {
+  if (Date.now() - new Date(doc.createdAt).getTime() &gt; STUCK_MS) {
+    await KitModel.updateOne({ _id: id, status: "generating" },
+                             { $set: { status: "failed", error: STUCK_MSG } });
+  }
+}</code></pre>
+
+<div class="keystone">
+  <p><code>runGeneration</code> writes <code>failed</code> in its own <code>catch</code>. But a function
+  that is <em>hard-killed</em> — OOM, cold-start death — never reaches its catch, and the row stays
+  <code>generating</code> forever while the client polls until the end of time. The watchdog reconciles
+  exactly that case.</p>
+</div>
+
+<p>Two details that make it safe. The threshold <strong>exceeds</strong> <code>maxDuration</code>, so a
+legitimately slow run is never falsely reaped. And the update is <strong>guarded on
+<code>status: "generating"</code></strong>, so if the job finished a millisecond earlier, zero documents
+match and the watchdog does nothing — it can never overwrite a real result.</p>
+
+<h3>Three compare-and-swaps, three different preconditions</h3>
+
+<p>Worth collecting in one place, because it is the same primitive used three ways:</p>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Where</th><th>Precondition</th><th>Prevents</th></tr></thead>
+  <tbody>
+    <tr><td>PATCH / regenerate</td><td><code>version: current</code></td><td>Two writers on one kit; one edit silently discarding another</td></tr>
+    <tr><td>retry</td><td><code>status: "failed"</code></td><td>Two concurrent retries both launching the pipeline</td></tr>
+    <tr><td>watchdog</td><td><code>status: "generating"</code></td><td>Reaping a job that just succeeded</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>The regenerate one is the most interesting, because the reason is stated in the source:</p>
+
+<pre><code>// Compare-and-swap: the long LLM call ran on a snapshot; only commit if the
+// stored version is still the one we started from.</code></pre>
+
+<p>Regeneration reads the kit, spends <em>seconds</em> in an LLM call, then writes. That window is wide
+open — plenty of time for the user to edit something in another tab. Without the CAS, the regenerate
+would write back a kit computed from stale state and the edit would vanish. This is read-modify-write
+with a very long modify, which is the worst possible shape for a lost update.</p>
+
+<h3>Dependent recomputation</h3>
+
+<pre><code>function recomputeQuestionDependents(kit: Kit): void {
+  kit.coverage.uncovered_requirement_ids = findUncovered(kit.role.requirements, kit.questions);
+  kit.schedule = allocateSchedule(kit.questions, kit.schedule.days_available, mustIdsOf(kit));
+}</code></pre>
+
+<p>Touch the questions and two derived things go stale: coverage, and the schedule that references
+question ids. One function called on every question mutation keeps them in step. This is the concrete
+answer to the id-reassignment hazard flagged in the state-model section — and
+<code>validateKit</code>'s schedule check is the backstop if it is ever forgotten.</p>
+
+<h3>Input handling</h3>
+
+<p>Every body is typed as <code>unknown</code> and narrowed by hand:</p>
+
+<pre><code>const jd = typeof body.jd === "string" ? body.jd : "";
+const days = Number(body.days) &gt; 0 ? Math.floor(Number(body.days)) : 5;</code></pre>
+
+<p>No validation library. Coercion with a sane default rather than a 400 for anything recoverable — a
+missing <code>days</code> becomes 5, a non-string JD becomes empty and <em>then</em> fails the explicit
+required check. Enums are checked against a <code>Set</code> (<code>QUESTION_CATEGORIES</code>,
+<code>SECTIONS</code>) rather than trusted, which is the same clamping discipline the pipeline applies
+to model output. The honest note: a schema validator like Zod would express all of this more compactly
+and is the obvious upgrade if the surface grows.</p>
+
+<p class="footnote">The <code>reorder</code> action has one subtlety worth noting: questions are grouped
+by category in the UI, so "move up" swaps with the nearest neighbour <em>in the same category</em>,
+walking past out-of-category items. Flashcards swap with the direct neighbour. And a reorder at the end
+of a list is a no-op rather than an error — a valid request that changes nothing.</p>
+
+<h2 id="state"><span class="num">15</span>The edit state model</h2>
 
 <p><code>src/core/regenerate.ts</code>. The user can edit, delete, add and regenerate items. Regenerate
 must not destroy their work.</p>
@@ -916,7 +1165,89 @@ document, so the kit's contract stays exactly as specified.</p>
   exactly why that check earns its place.</p>
 </div>
 
-<h2 id="cas"><span class="num">14</span>Optimistic concurrency</h2>
+<h2 id="regen"><span class="num">16</span>Regeneration in full</h2>
+
+<p>The state model says which items are protected. This is the machinery that honours it.</p>
+
+<h3><code>partition</code> — split by protection</h3>
+
+<pre><code>export function partition&lt;T extends { id: string }&gt;(items: T[], status: StatusMap):
+  { locked: { item: T; status: EditStatus }[]; pristine: T[] }</code></pre>
+
+<p>Items carrying a status are locked; items absent from the map are pristine. Only pristine items are
+ever replaced.</p>
+
+<h3><code>reconcileFresh</code> — the two silent failures</h3>
+
+<pre><code>export function reconcileFresh&lt;T extends { id: string }&gt;(fresh: T[], pristine: T[]): T[] {
+  const capped = fresh.slice(0, pristine.length);
+  if (capped.length &gt;= pristine.length) return capped;
+  return [...capped, ...pristine.slice(capped.length)];
+}</code></pre>
+
+<div class="note warn">
+  <span class="tag">Both of these would have been invisible</span>
+  <p><strong>The model returns MORE than requested</strong> → the section grows every time you click
+  regenerate. Five clicks and you have fifty questions. Capping to the pristine count stops it.</p>
+  <p><strong>The model returns FEWER</strong> — most importantly zero, when the call threw and grounded
+  to <code>[]</code> → the section silently shrinks, and a failed regenerate looks like a successful
+  deletion. Keeping the leftover <em>original</em> pristine items means an empty result is an honest
+  no-op instead of destruction.</p>
+</div>
+
+<p>That second branch is the one worth being able to point at. The failure mode it prevents is a user
+clicking regenerate on a rate-limited day and watching their questions disappear.</p>
+
+<h3><code>mergeSection</code> — rebuild a whole section</h3>
+
+<p>Locked items first with their status intact, then the fresh ones as pristine, then
+<strong>ids reassigned contiguously</strong> (<code>q-1 … q-N</code>) and the status map re-keyed to the
+new ids. Contiguous ids are what stop a user-created <code>q-u1a2b3</code> from ever colliding with a
+generated <code>q-7</code>.</p>
+
+<h3><code>mergeScoped</code> — regenerate one category without disturbing the rest</h3>
+
+<pre><code>for (const item of items) {
+  const st = status[item.id];
+  if (!st &amp;&amp; inScope(item)) {
+    const replacement = queue.shift();       // pristine AND in scope -&gt; swap in place
+    if (replacement) ordered.push({ item: replacement, st: undefined });
+  } else {
+    ordered.push({ item, st });              // locked, or out of scope -&gt; untouched
+  }
+}
+for (const extra of queue) ordered.push({ item: extra, st: undefined });</code></pre>
+
+<div class="keystone">
+  <p>Regenerating "system-design" must leave the technical questions exactly where they are —
+  <em>and</em> must not renumber them into a collision. The walk preserves position for everything out
+  of scope and reassigns ids across the whole section afterwards.</p>
+</div>
+
+<p>Two things the route does around it, both easy to miss and both correct:</p>
+
+<ul>
+  <li><strong>The keep-list is every existing question, not just the in-scope ones.</strong> So a fresh
+  system-design question cannot duplicate a question already living under <em>technical</em>.</li>
+  <li><strong>The avoid-list is the tombstones.</strong> Deleted items are named in the prompt as things
+  not to produce, so regeneration does not resurrect what the user threw away.</li>
+</ul>
+
+<h3>Regenerating the schedule is not an LLM call</h3>
+
+<pre><code>if (section === "schedule") {
+  kit.schedule = allocateSchedule(kit.questions, kit.schedule.days_available, mustIds);
+}</code></pre>
+
+<p>The schedule is deterministic, so "regenerate" means <em>recompute from the current questions</em>.
+Same button in the UI, no model involved, no tokens spent, instant. Worth knowing as a concrete example
+of the thesis: because the decision lives in a pure function, the expensive path is not needed for it.</p>
+
+<p>One more lock: a question <strong>hand-moved to another category</strong> is marked
+<code>edited</code>. Moving something is a user decision, so it gets the same protection as rewriting
+it.</p>
+
+<h2 id="cas"><span class="num">17</span>Optimistic concurrency</h2>
 
 <p>Every mutating write compare-and-swaps on a version counter:</p>
 
@@ -965,7 +1296,7 @@ writes <code>failed</code> with the message.</p>
 <p>There is a self-heal path — <code>POST /api/kits/[id]/retry</code> — sharing the exact same
 <code>runGeneration</code> function, so first run and retry cannot drift apart.</p>
 
-<h2 id="weakspots"><span class="num">15</span>Weak spots</h2>
+<h2 id="weakspots"><span class="num">18</span>Weak spots</h2>
 
 <p><code>src/core/weakSpots.ts</code>. Pure, no LLM. The creative feature, and architecturally it is the
 same graph read backwards.</p>
@@ -995,7 +1326,210 @@ fixes.</p>
 The user says which cards they know. That is the weakest possible input for a diagnostic, and replacing
 it with graded answers is what moves the whole feature onto measurement.</p>
 
-<h2 id="defect"><span class="num">16</span>The defect v2 is built on</h2>
+<h2 id="infra"><span class="num">19</span>Persistence, config and the batch runner</h2>
+
+<h3>The Mongoose connection cache</h3>
+
+<pre><code>const globalForMongoose = globalThis as unknown as { _mongoose?: Cache };
+const cache: Cache = globalForMongoose._mongoose ?? { conn: null, promise: null };
+globalForMongoose._mongoose = cache;
+
+export async function connectDB(): Promise&lt;typeof mongoose&gt; {
+  if (cache.conn) return cache.conn;
+  if (!cache.promise) cache.promise = mongoose.connect(uri);   // &lt;- cache the PROMISE
+  cache.conn = await cache.promise;
+  return cache.conn;
+}
+</code></pre>
+
+<div class="note">
+  <span class="tag">Why the promise is cached, not just the connection</span>
+  <p>Two requests arriving before the first connection completes would both see
+  <code>cache.conn === null</code> and both call <code>mongoose.connect</code>, opening two pools.
+  Caching the in-flight <em>promise</em> means the second caller awaits the first one's work. This is
+  memoisation of an async operation, and it is the same read-then-act race as everything else in this
+  codebase — just in process memory instead of a database.</p>
+  <p>It hangs off <code>globalThis</code> because Next.js hot reload re-evaluates modules, so a
+  module-scoped variable would reset on every edit and leak a pool per save.</p>
+</div>
+
+<h3>Models</h3>
+
+<pre><code>export const KitModel  = models.Kit  || model("Kit", KitSchema);
+export const UserModel = models.User || model("User", UserSchema);</code></pre>
+
+<p>The <code>models.X ||</code> guard is the same hot-reload problem: registering a model twice throws.</p>
+
+<p><code>UserSchema</code> is four fields — <code>email</code> (required, unique, lowercased, trimmed),
+<code>passwordHash</code>, <code>salt</code>, <code>createdAt</code>. Two things worth noting:</p>
+
+<ul>
+  <li><strong>Lowercasing and trimming happen in the schema</strong>, so the uniqueness constraint cannot
+  be bypassed by <code>Alice@x.com</code> versus <code>alice@x.com</code>. The route also lowercases
+  before the lookup, so both layers agree.</li>
+  <li><strong>Signup does a check-then-insert</strong> — <code>findOne</code>, then <code>create</code> —
+  which is the classic race. Two simultaneous signups for one email could both pass the check. The
+  <code>unique: true</code> index is what actually saves it: the second insert fails at the database.
+  <em>The index is the mechanism; the check is only for the nice error message.</em> Exactly the same
+  structure as Holdfast's mechanism 2.</li>
+</ul>
+
+<p><code>KitSchema</code> stores the generated <code>Kit</code> as <code>Schema.Types.Mixed</code> so its
+specified shape is preserved exactly rather than re-declared, with <code>{ minimize: false }</code> so
+empty objects are not silently dropped. <code>userId</code> is indexed.</p>
+
+<h3>The env loader</h3>
+
+<p><code>src/lib/env.ts</code> — 29 lines, no dependency. Next.js auto-loads <code>.env.local</code>;
+the CLI run through <code>tsx</code> does not, so it loads the file itself. It <strong>never overrides
+anything already set</strong> (<code>if (key in process.env) continue</code>), so real CI environment
+variables always win over a stray local file. Handles quoted values and strips inline
+<code>&nbsp;#</code> comments.</p>
+
+<h3>Tavily</h3>
+
+<p><code>src/lib/tavily.ts</code> — <code>MAX_RESULTS = 3</code>, <code>search_depth: "basic"</code>,
+an 8-second timeout, and <code>[]</code> on <em>any</em> failure: missing key, empty query, non-OK
+response, or a throw. Results are mapped defensively (<code>asString</code> on every field) and any
+result without a URL is filtered out — a citation you cannot link to is not a source.</p>
+
+<h3>The batch runner</h3>
+
+<p><code>cli/evaluate.ts</code>, 116 lines. Reads a JSON array of cases, runs <code>makeKit</code> on
+each, validates, writes a <code>BatchOutput</code> document.</p>
+
+<pre><code>npm run evaluate -- --input cli/cases.example.json --output kits.json</code></pre>
+
+<pre><code>{ version: "1", generated_at: &lt;ISO&gt;, kits: [ { id, status: "ok"|"failed", kit, error } ] }</code></pre>
+
+<p>Two failure codes, and the distinction matters: <code>MAKE_KIT_FAILED</code> means the pipeline threw,
+<code>KIT_VALIDATION_FAILED</code> means it produced something structurally broken. Each case is isolated
+in its own <code>try/catch</code>, so one failure does not abort the run.</p>
+
+<div class="note warn">
+  <span class="tag">Where v2 rung 7 lands</span>
+  <p>The loop is strictly sequential and holds every result in memory until the end, so a crash or a
+  429 partway through loses <strong>the whole run</strong>. With ten frozen JDs and free-tier token
+  limits, that is the difference between an eval harness you use and one you avoid.</p>
+  <p>Rung 7 makes it resumable: persist each case as it completes, skip completed cases on restart. A
+  failure then costs one case. That, plus the content-hash cache meaning most cases cost nothing the
+  second time, is what makes running the golden set repeatedly affordable — which is the entire point of
+  item 2.</p>
+</div>
+
+<h2 id="frontend"><span class="num">20</span>The frontend map</h2>
+
+<p>2,392 lines. Not the engineering argument, but here is the shape so nothing in the repo is a mystery.</p>
+
+<h3>Server components fetch, client components hold state</h3>
+
+<p>Three pages, all <code>async</code> server components marked
+<code>dynamic = "force-dynamic"</code> — they read the session cookie, so they can never be statically
+cached. Each one fetches and then hands data to a client component:</p>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Route</th><th>Server component does</th><th>Hands to</th></tr></thead>
+  <tbody>
+    <tr><td><code>/</code></td><td>Reads the session, lists the user's kits</td><td><code>Builder</code> + <code>KitList</code></td></tr>
+    <tr><td><code>/login</code></td><td>Redirects if already signed in</td><td><code>AuthForm</code></td></tr>
+    <tr><td><code>/kit/[id]</code></td><td>Loads the kit, checks ownership</td><td><code>KitView</code> or <code>GeneratingView</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Component</th><th class="num">Lines</th><th>Holds</th></tr></thead>
+  <tbody>
+    <tr><td><code>KitView</code></td><td class="num">1,407</td><td>The whole study app: 5 tabs, all editing, all regeneration. <code>kit</code>, <code>editState</code>, <code>version</code></td></tr>
+    <tr><td><code>GeneratingView</code></td><td class="num">183</td><td>Polls GET, shows the 8-step progress, offers retry on failure</td></tr>
+    <tr><td><code>Builder</code></td><td class="num">127</td><td>The JD / URL / days form, POSTs and redirects</td></tr>
+    <tr><td><code>AuthForm</code></td><td class="num">94</td><td>One form, <code>mode</code> toggles login ⇄ signup</td></tr>
+    <tr><td><code>KitList</code></td><td class="num">56</td><td>Saved kits, <code>useTransition</code> for navigation pending state</td></tr>
+    <tr><td><code>LogoutButton</code>, <code>HomeLink</code>, <code>Droplets</code>, 2× <code>loading</code></td><td class="num">114</td><td>Small pieces; <code>Droplets</code> is decorative</td></tr>
+    <tr><td><code>globals.css</code></td><td class="num">154</td><td>Tailwind v4 design tokens, Space Grotesk + Inter</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>The one thing to know about <code>KitView</code></h3>
+
+<p>Tabs are <code>Overview · Questions · Flashcards · Plan · Weak spots</code>. It holds
+<code>version</code> in state and sends it with every mutation, so the server's CAS has something to
+compare against — <strong>that is the client half of the optimistic-concurrency story</strong>. On a 409
+it refetches and reconciles rather than retrying blindly.</p>
+
+<div class="note bad">
+  <span class="tag">A real code-quality problem, not a documentation gap</span>
+  <p>1,407 lines in one component is <strong>59% of the entire frontend</strong> and 1.7× the 800-line
+  ceiling in your own <code>~/.claude/rules/common/coding-style.md</code>. It is also the first thing
+  anyone sees in the file tree.</p>
+  <p>The fix is mechanical, because the seams are already there: the five tabs are five components.
+  Pulling <code>QuestionsTab</code>, <code>FlashcardsTab</code>, <code>PlanTab</code> and
+  <code>WeakSpotsTab</code> out — passing <code>kit</code>, <code>editState</code> and the mutation
+  callbacks down — leaves a shell of maybe 200 lines. Worth one session, and it is the single cheapest
+  thing that changes the impression of the repo.</p>
+</div>
+
+<h2 id="tests"><span class="num">21</span>The test suite</h2>
+
+<p>19 files, 150 tests, no network and no API key. Every one runs against injected fakes, which is the
+dependency-injection seam paying for itself.</p>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>File</th><th class="num">Tests</th><th>What it pins down</th></tr></thead>
+  <tbody>
+    <tr><td><code>cacheKey</code></td><td class="num">18</td><td>Normalisation rules, different inputs never colliding, version ordering, URL canonicalisation</td></tr>
+    <tr><td><code>visitSite</code></td><td class="num">15</td><td><code>rankLinks</code>, text extraction, orchestration with a fake fetch, path-dropping</td></tr>
+    <tr><td><code>readJd</code></td><td class="num">13</td><td><strong>The grounding gate</strong>, <code>derivePriority</code>, <code>normalize</code>, end-to-end with a fake LLM</td></tr>
+    <tr><td><code>regenerate</code></td><td class="num">12</td><td><code>mergeScoped</code>, <code>reconcileFresh</code> (no shrink, no inflation), <code>partition</code></td></tr>
+    <tr><td><code>schedule</code></td><td class="num">9</td><td>Spans exactly N days, must-haves land earlier, the greedy pack</td></tr>
+    <tr><td><code>searchWeb</code></td><td class="num">9</td><td>Honest-none guards, enrichment, <code>companyFromUrl</code>, <code>mergeSources</code></td></tr>
+    <tr><td><code>rateLimit</code></td><td class="num">6</td><td>Fixed window behaviour, <code>clientIp</code></td></tr>
+    <tr><td><code>coverage</code></td><td class="num">5</td><td>The set difference</td></tr>
+    <tr><td><code>fillGaps</code></td><td class="num">5</td><td>Append-don't-clobber, early exit, the pass cap</td></tr>
+    <tr><td><code>llmRetryAfter</code></td><td class="num">5</td><td>Header and body parsing of a provider's stated wait</td></tr>
+    <tr><td><code>timeout</code></td><td class="num">5</td><td>Abort behaviour, and a full generation against an unreachable site completing in bounded time</td></tr>
+    <tr><td><code>validate</code></td><td class="num">5</td><td>Whole-kit structural checks and id cross-references</td></tr>
+    <tr><td><code>weakSpots</code></td><td class="num">5</td><td>Risk arithmetic, the unrated-scores-zero rule</td></tr>
+    <tr><td><code>auth</code></td><td class="num">4</td><td><strong>The production secret hard-fail</strong>, password hashing round-trip, tampered signature</td></tr>
+    <tr><td><code>makeFlashcards</code></td><td class="num">4</td><td>Requirement cross-reference verification</td></tr>
+    <tr><td><code>parseArray</code></td><td class="num">4</td><td>Model shape drift must not empty a section</td></tr>
+    <tr><td><code>makeQuestions</code></td><td class="num">3</td><td>Per-category batching, id grounding</td></tr>
+    <tr><td><code>pipeline</code></td><td class="num">2</td><td>The step 1 → 2 → 3 → 4 chain with everything faked</td></tr>
+    <tr><td><code>ssrf</code></td><td class="num">—</td><td>Private-range detection across IPv4, IPv6 and IPv4-mapped</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="keystone">
+  <p>Read the describe names and the architecture reads back: <em>"the code that catches LLM
+  hallucinations"</em>, <em>"code decides must/nice from wording"</em>, <em>"code verifies the LLM's
+  requirement cross-references"</em>, <em>"model shape drift must not empty a section"</em>, <em>"no
+  forgeable cookies in prod"</em>. The suite is a list of the gates.</p>
+</div>
+
+<h3>What the suite does not cover</h3>
+
+<ul>
+  <li><strong>No component or browser tests.</strong> 2,392 lines of frontend are untested. Playwright
+  over the sign-up → generate → edit path would be the highest-value addition, and it is not in v2 scope.</li>
+  <li><strong>No route-handler tests.</strong> The CAS logic is tested through the pure functions it
+  calls, but not through the HTTP layer — so a 409 path could regress without a test noticing.</li>
+  <li><strong>No live-provider test.</strong> By design: a test that needs an API key is a test that
+  fails in CI. The trade is that a provider changing its response shape would only show up at runtime,
+  which is precisely what v2's recording layer and eval harness are for.</li>
+  <li><strong>The one slow test is honest about why.</strong> <code>timeout.test.ts</code> takes ~8
+  seconds because it asserts a full generation against an unreachable company site completes in bounded
+  time with an honest-none brief. That is a real guarantee and it costs 8 seconds to prove.</li>
+</ul>
+
+<p>Run it with <code>npx vitest run</code>. The whole suite is about 10 seconds, 8 of which are that one
+test.</p>
+
+<h2 id="defect"><span class="num">22</span>The defect v2 is built on</h2>
 
 <p><code>src/lib/rateLimit.ts</code>, as called from <code>src/app/api/kits/route.ts</code>:</p>
 
@@ -1028,7 +1562,7 @@ entire token window for everyone.</p>
   v2 item 5, and finding it yourself is the part that makes it convincing.</p>
 </div>
 
-<h2 id="v2"><span class="num">17</span>v2: six items, one chain</h2>
+<h2 id="v2"><span class="num">23</span>v2: six items, one chain</h2>
 
 <p>Where it starts: the app generates a kit and throws away everything about <em>how</em>. Raw model
 output gone, prompt version unknown, cost unknown. It works, and nothing about it is provable.</p>
@@ -1057,7 +1591,7 @@ mock interviews; queues, workers, multi-instance, Kubernetes; vector DB, semanti
 orgs and collaboration; any redesign. All of it lives in <code>IDEAS.md</code> as additions to a shipped
 project — which reads completely differently from a wishlist on an unfinished one.</p>
 
-<h2 id="built"><span class="num">18</span>What exists today</h2>
+<h2 id="built"><span class="num">24</span>What exists today</h2>
 
 <p>Item 1, rungs 1 and 2. Commit <code>3bedc8c</code>, plus <code>docs/v2-item1-plan.md</code>.</p>
 
@@ -1156,7 +1690,7 @@ what counts as a meaningful change — and the cost runs the other way:</p>
 </table>
 </div>
 
-<h2 id="defend"><span class="num">19</span>Defending it out loud</h2>
+<h2 id="defend"><span class="num">25</span>Defending it out loud</h2>
 
 <details>
 <summary>Isn't this just a wrapper around an LLM API?</summary>
@@ -1283,7 +1817,7 @@ it — hand-typed, AI-assisted. Two projects, two different proofs.</p>
 </div>
 </details>
 
-<h2 id="constants"><span class="num">20</span>Constant index</h2>
+<h2 id="constants"><span class="num">26</span>Constant index</h2>
 
 <div class="scroll">
 <table>
@@ -1314,7 +1848,7 @@ it — hand-typed, AI-assisted. Two projects, two different proofs.</p>
 </table>
 </div>
 
-<h2 id="glossary"><span class="num">21</span>Glossary</h2>
+<h2 id="glossary"><span class="num">27</span>Glossary</h2>
 
 <div class="scroll">
 <table>
@@ -1341,7 +1875,7 @@ it — hand-typed, AI-assisted. Two projects, two different proofs.</p>
 </table>
 </div>
 
-<h2 id="runbook"><span class="num">22</span>Runbook</h2>
+<h2 id="runbook"><span class="num">28</span>Runbook</h2>
 
 <pre><code>npm install
 cp .env.example .env.local     # fill in the values below
@@ -1376,13 +1910,7 @@ SESSION_SECRET=...             # any long random string</code></pre>
 </div>
 
 <hr>
-<p class="footnote">Built from source on 2026-09-22: <code>src/core/pipeline.ts</code>,
-<code>types.ts</code>, <code>validate.ts</code>, <code>coverage.ts</code>, <code>schedule.ts</code>,
-<code>weakSpots.ts</code>, <code>parseArray.ts</code>, <code>regenerate.ts</code>,
-<code>recording.ts</code>, <code>cacheKey.ts</code>, all seven <code>core/steps/*</code>,
-<code>src/lib/{llm,http,ssrf,timeout,rateLimit,generate}.ts</code>, <code>src/models/kit.ts</code>,
-the API routes, the README at <code>submission-2026-09-13</code>, and
-<code>docs/v2-item1-plan.md</code>.</p>
+<p class="footnote"><strong>Coverage:</strong> this manual now documents every file in the repository. Built from a full read on 2026-09-22 of <code>src/core/**</code> (pipeline, types, validate, coverage, schedule, weakSpots, parseArray, regenerate, recording, cacheKey and all seven steps), <code>src/lib/**</code> (llm, http, ssrf, timeout, rateLimit, generate, auth, db, env, tavily), <code>src/models/**</code>, all seven API route handlers, <code>cli/evaluate.ts</code>, the 19 test files, the frontend under <code>src/app/**</code>, the README at <code>submission-2026-09-13</code>, and <code>docs/v2-item1-plan.md</code>. The only thing deliberately summarised rather than walked line by line is the 1,407-line <code>KitView.tsx</code> — see <a href="#frontend">the frontend map</a> for why that file is a problem in its own right.</p>
 
 </div>
 </main>
