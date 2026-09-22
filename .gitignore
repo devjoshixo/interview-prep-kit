@@ -39,3 +39,4 @@ next-env.d.ts
 DESIGN.html
 .env.deploy
 .env*
+.aider*
