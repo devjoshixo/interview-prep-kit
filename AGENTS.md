@@ -11,6 +11,9 @@ the fields by name and enforces every constraint.
 **This is the ACTIVE project.** Live at interview-prep-kit-sigma.vercel.app.
 
 ## Read before touching anything
+**`docs/BUILD-GUIDE.md`** — where to start on each remaining v2 item, what to teach first, and the
+traps (including facts checked in the code that are easy to get wrong).
+
 **`docs/prep-kit-reference.html`** — 28 sections, every file documented. The gate catalogue in §10 is
 the one to have in your head: every place code refuses to take the model at its word.
 
